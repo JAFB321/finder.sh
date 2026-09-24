@@ -29,7 +29,8 @@ function createWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      contextIsolation: true
+      contextIsolation: true,
+      backgroundThrottling: false
     }
   })
   win.on('ready-to-show', () => win.show())
@@ -79,6 +80,36 @@ app.whenReady().then(() => {
   const argIdx = process.argv.indexOf('--add-root')
   if (argIdx > 0 && process.argv[argIdx + 1]) {
     addRoot(process.argv[argIdx + 1])
+  }
+  // THEFINDER_STEPS='[{"wait":5000,"eval":"__tf.getState().setFilter({text:\"dog\"})","shot":"/tmp/a.png"}]'
+  if (process.env.THEFINDER_STEPS) {
+    const steps = JSON.parse(process.env.THEFINDER_STEPS) as {
+      wait?: number
+      eval?: string
+      shot?: string
+    }[]
+    void (async () => {
+      for (const st of steps) {
+        await new Promise((r) => setTimeout(r, st.wait ?? 1000))
+        if (st.eval) {
+          try {
+            const out = await win.webContents.executeJavaScript(st.eval, true)
+            console.log(
+              '[step:eval]',
+              st.eval.slice(0, 80),
+              '=>',
+              JSON.stringify(out)?.slice(0, 200)
+            )
+          } catch (e) {
+            console.log('[step:eval:error]', (e as Error).message)
+          }
+        }
+        if (st.shot) {
+          writeFileSync(st.shot, (await win.webContents.capturePage()).toPNG())
+          console.log('[step:shot]', st.shot)
+        }
+      }
+    })()
   }
   if (process.env.THEFINDER_SCREENSHOT) {
     const delay = Number(process.env.THEFINDER_SCREENSHOT_DELAY ?? 8000)

@@ -9,6 +9,9 @@ import { Loupe } from './features/loupe/Loupe'
 import { CommandPalette } from './features/palette/CommandPalette'
 import { useLibrary } from './features/library/store'
 
+// automation hook (see THEFINDER_STEPS in main); harmless in production
+;(window as unknown as { __tf: typeof useLibrary }).__tf = useLibrary
+
 export default function App(): React.JSX.Element {
   const reload = useLibrary((s) => s.reload)
   const patchTiles = useLibrary((s) => s.patchTiles)

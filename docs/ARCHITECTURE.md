@@ -77,3 +77,15 @@ logs/
 - Layout computation (justified/masonry) is pure and memoized on `[ids, widths, containerWidth, rowHeight]`; runs in renderer main thread (fast: O(n)) — move to a Web Worker if > 50k.
 - Worker pool size = `max(2, cpus - 2)`; embed worker = 1 (ONNX uses its own threads).
 - SQLite: `PRAGMA journal_mode=WAL; synchronous=NORMAL; mmap_size=256MB; cache_size=-64000`. Batched inserts in transactions of 500.
+
+## Headless verification hooks (dev)
+
+Main process honours a few env vars / flags so the app can be driven without a human:
+
+- `THEFINDER_HOME=<dir>` — use an isolated data dir instead of `~/.thefinder`.
+- `--add-root <path>` — register a folder at startup (no dialog).
+- `THEFINDER_SCREENSHOT=<png>` (+ `THEFINDER_SCREENSHOT_DELAY` ms) — capture the window once.
+- `THEFINDER_STEPS='[{"wait":ms,"eval":"<js in renderer>","shot":"<png>"}]'` — scripted scenario. The renderer exposes `window.__tf` (zustand store) and `window.api`.
+- Renderer console errors/warnings are relayed to stdout as `[renderer:error] …`.
+
+`backgroundThrottling` is disabled on the window so `capturePage` returns a fresh frame even when unfocused.

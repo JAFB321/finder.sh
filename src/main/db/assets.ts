@@ -313,11 +313,29 @@ function build(filter: LibraryFilter): Built {
   if (filter.color) {
     const [r, g, b] = hexToRgb(filter.color)
     const lab = rgbToLab(r, g, b)
-    // score: weighted min distance over dominant colors; assets without colors are excluded
-    joins += ` JOIN (SELECT asset_id, MIN(((l-?)*(l-?) + (a-?)*(a-?) + (b-?)*(b-?)) / (0.3 + weight)) AS cdist FROM asset_colors GROUP BY asset_id) c ON c.asset_id = a.id`
-    params.unshift(lab.l, lab.l, lab.a, lab.a, lab.b, lab.b)
-    where.push('c.cdist < 900')
-    order = 'c.cdist ASC'
+    // Per asset: closest dominant color (ΔE² in Lab). Keep assets where some color is within ΔE≈40,
+    // rank by distance discounted by that color's share of the image.
+    joins += ` JOIN (
+      SELECT asset_id,
+             MIN((l-?)*(l-?) + (a-?)*(a-?) + (b-?)*(b-?)) AS cmin,
+             MIN(((l-?)*(l-?) + (a-?)*(a-?) + (b-?)*(b-?)) / (0.15 + weight)) AS cscore
+      FROM asset_colors GROUP BY asset_id) c ON c.asset_id = a.id`
+    params.unshift(
+      lab.l,
+      lab.l,
+      lab.a,
+      lab.a,
+      lab.b,
+      lab.b,
+      lab.l,
+      lab.l,
+      lab.a,
+      lab.a,
+      lab.b,
+      lab.b
+    )
+    where.push('c.cmin < 1600')
+    order = 'c.cscore ASC'
   }
   if (!order) {
     const dir = filter.sortDir === 'asc' ? 'ASC' : 'DESC'

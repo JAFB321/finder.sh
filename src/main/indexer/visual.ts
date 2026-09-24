@@ -99,7 +99,7 @@ export function dominantColors(
       b: Math.round(c[2]),
       weight: counts[i] / n
     }))
-    .filter((c) => c.weight > 0.02)
+    .filter((c) => c.weight > 0.015)
     .sort((a, b) => b.weight - a.weight)
 }
 

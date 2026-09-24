@@ -251,9 +251,9 @@ async function visual(
   const img = sharp(req.thumb)
   const [gray, rgb] = await Promise.all([
     img.clone().resize(32, 32, { fit: 'fill' }).grayscale().raw().toBuffer(),
-    img.clone().resize(48, 48, { fit: 'inside' }).removeAlpha().raw().toBuffer()
+    img.clone().resize(64, 64, { fit: 'inside' }).removeAlpha().raw().toBuffer()
   ])
-  return { phash: phash32(gray).toString(), dominant: dominantColors(rgb, 5) }
+  return { phash: phash32(gray).toString(), dominant: dominantColors(rgb, 8) }
 }
 
 import { workerData } from 'worker_threads'
