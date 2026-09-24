@@ -5,7 +5,7 @@ Read `docs/ARCHITECTURE.md` before touching main-process code. Product scope liv
 
 ## Toolchain
 
-Node 22 via nvm (`.nvmrc`). Run `source ~/.nvm/nvm.sh && nvm use` before any pnpm command in a fresh shell. Node 20 breaks `@electron/rebuild` and `electron-builder`.
+Node 22 via nvm (`.nvmrc`). Run `source ~/.nvm/nvm.sh && nvm use` before any pnpm command in a fresh shell. Node 20 breaks `@electron/rebuild` and `electron-builder`. User shell has pnpm 12 with a supply-chain policy (minimumReleaseAge): build-script allowlist lives in `pnpm-workspace.yaml` (`allowBuilds`), and if the lockfile is rejected run `pnpm clean --lockfile && pnpm install`.
 
 ## Commands
 

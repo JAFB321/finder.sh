@@ -1,0 +1,10 @@
+# pnpm >= 10 reads the build-script allowlist from here (package.json "pnpm" field is ignored).
+allowBuilds:
+  better-sqlite3: true
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: false
+  sharp: true
+  '@huggingface/transformers': true
