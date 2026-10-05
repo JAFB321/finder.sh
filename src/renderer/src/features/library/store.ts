@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AssetTile, LayoutKind, LibraryFilter } from '@shared/types'
 import { invoke } from '@renderer/lib/api'
+import { timelineOrder, type TimeGroupSetting } from '../timeline/sections'
 
 const PAGE = 2000
 
@@ -20,6 +21,8 @@ interface LibraryState {
   anchor: number
   loupe: boolean
   inspector: boolean
+  /** timeline grouping; 'auto' follows thumb size */
+  timelineGroup: TimeGroupSetting
 
   setFilter: (patch: Partial<LibraryFilter> | ((f: LibraryFilter) => LibraryFilter)) => void
   setLayout: (l: LayoutKind) => void
@@ -32,17 +35,39 @@ interface LibraryState {
   setCursor: (i: number) => void
   setLoupe: (v: boolean) => void
   toggleInspector: () => void
+  setTimelineGroup: (g: TimeGroupSetting) => void
 }
 
 const persisted = (() => {
   try {
     return JSON.parse(localStorage.getItem('tf.ui') ?? '{}') as Partial<
-      Pick<LibraryState, 'layout' | 'size' | 'inspector'>
+      Pick<LibraryState, 'layout' | 'size' | 'inspector' | 'timelineGroup'>
     >
   } catch {
     return {}
   }
 })()
+
+/**
+ * Ids in server order. The timeline re-sorts client-side (takenAt desc, undated last) so it
+ * works for any filter/sort (similar-to, random…) and switching layouts never refetches;
+ * leaving the timeline restores this order.
+ */
+let baseIds: number[] = []
+
+/** Ids as shown by the current layout, with cursor/anchor remapped by id. */
+function ordered(
+  s: Pick<LibraryState, 'layout' | 'tiles' | 'ids' | 'cursor' | 'anchor'>,
+  layout = s.layout,
+  tiles = s.tiles
+): Pick<LibraryState, 'ids' | 'cursor' | 'anchor'> {
+  const ids = layout === 'timeline' ? timelineOrder(baseIds, tiles) : baseIds
+  const remap = (i: number): number => {
+    if (i < 0 || s.ids[i] == null) return i
+    return ids === s.ids ? i : ids.indexOf(s.ids[i])
+  }
+  return { ids, cursor: remap(s.cursor), anchor: remap(s.anchor) }
+}
 
 export const useLibrary = create<LibraryState>((set, get) => ({
   filter: { sort: 'takenAt', sortDir: 'desc' },
@@ -57,6 +82,7 @@ export const useLibrary = create<LibraryState>((set, get) => ({
   anchor: -1,
   loupe: false,
   inspector: persisted.inspector ?? true,
+  timelineGroup: persisted.timelineGroup ?? 'auto',
 
   setFilter: (patch) => {
     const f = typeof patch === 'function' ? patch(get().filter) : { ...get().filter, ...patch }
@@ -68,7 +94,9 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     void get().reload()
   },
   setLayout: (layout) => {
-    set({ layout })
+    const s = get()
+    const reorder = (layout === 'timeline') !== (s.layout === 'timeline')
+    set(reorder ? { layout, ...ordered(s, layout) } : { layout })
     persist(get())
   },
   setSize: (size) => {
@@ -87,13 +115,18 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     // ids come from the same resolved order; fetch the rest in pages
     const ids = await invoke('library:ids', { filter })
     if (get().gen !== gen) return
-    set({ ids, tiles, loading: ids.length > first.items.length })
+    baseIds = ids
+    set({ tiles, loading: ids.length > first.items.length, ...ordered({ ...get(), tiles }) })
     for (let off = first.items.length; off < ids.length; off += PAGE) {
       const page = await invoke('library:query', { filter, offset: off, limit: PAGE })
       if (get().gen !== gen) return
       const t2 = new Map(get().tiles)
       for (const t of page.items) t2.set(t.id, t)
-      set({ tiles: t2 })
+      set(
+        get().layout === 'timeline'
+          ? { tiles: t2, ...ordered({ ...get(), tiles: t2 }) }
+          : { tiles: t2 }
+      )
     }
     set({ loading: false })
     // keep selection only for ids still present
@@ -107,9 +140,18 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     const want = ids.filter((id) => mine.has(id))
     if (!want.length) return
     const fresh = await invoke('library:tiles', { ids: want })
-    const tiles = new Map(get().tiles)
-    for (const t of fresh) tiles.set(t.id, t)
-    set({ tiles })
+    const prev = get().tiles
+    const tiles = new Map(prev)
+    let datesChanged = false
+    for (const t of fresh) {
+      if (prev.get(t.id)?.takenAt !== t.takenAt) datesChanged = true
+      tiles.set(t.id, t)
+    }
+    set(
+      datesChanged && get().layout === 'timeline'
+        ? { tiles, ...ordered({ ...get(), tiles }) }
+        : { tiles }
+    )
   },
 
   select: (index, mode) => {
@@ -137,13 +179,22 @@ export const useLibrary = create<LibraryState>((set, get) => ({
   toggleInspector: () => {
     set({ inspector: !get().inspector })
     persist(get())
+  },
+  setTimelineGroup: (timelineGroup) => {
+    set({ timelineGroup })
+    persist(get())
   }
 }))
 
 function persist(s: LibraryState): void {
   localStorage.setItem(
     'tf.ui',
-    JSON.stringify({ layout: s.layout, size: s.size, inspector: s.inspector })
+    JSON.stringify({
+      layout: s.layout,
+      size: s.size,
+      inspector: s.inspector,
+      timelineGroup: s.timelineGroup
+    })
   )
 }
 

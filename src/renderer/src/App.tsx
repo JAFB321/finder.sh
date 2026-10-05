@@ -9,6 +9,7 @@ import { Loupe } from './features/loupe/Loupe'
 import { CommandPalette } from './features/palette/CommandPalette'
 import { useLibrary } from './features/library/store'
 import { TooltipProvider } from './components/ui/Tooltip'
+import type { LayoutKind } from '@shared/types'
 
 // automation hook (see THEFINDER_STEPS in main); harmless in production
 ;(window as unknown as { __tf: typeof useLibrary }).__tf = useLibrary
@@ -38,11 +39,13 @@ export default function App(): React.JSX.Element {
         void invoke('tags:setLabel', { ids: sel, label: labelKeys[e.key] })
         return
       }
-      const layouts: Record<string, 'justified' | 'grid' | 'masonry' | 'filmstrip'> = {
+      const layouts: Record<string, LayoutKind> = {
         '1': 'justified',
         '2': 'grid',
         '3': 'masonry',
-        '4': 'filmstrip'
+        '4': 'filmstrip',
+        // not '5': that key is the purple label when something is selected
+        y: 'timeline'
       }
       if (e.key in layouts) return s.setLayout(layouts[e.key])
       if (e.key === '-') return s.setSize(s.size - 20)

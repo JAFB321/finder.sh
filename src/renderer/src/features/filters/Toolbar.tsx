@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  CalendarDays,
   Columns3,
   Grid2x2,
   LayoutPanelTop,
@@ -14,12 +15,14 @@ import { LABEL_COLORS, type LayoutKind } from '@shared/types'
 import { cn, debounce } from '@renderer/lib/utils'
 import { useLibrary } from '../library/store'
 import { IconBtn } from '../sources/Sidebar'
+import { Tip } from '@renderer/components/ui/Tooltip'
 
 const LAYOUTS: { kind: LayoutKind; icon: React.ReactNode; title: string }[] = [
   { kind: 'justified', icon: <Rows3 size={14} />, title: 'Justified (1)' },
   { kind: 'grid', icon: <Grid2x2 size={14} />, title: 'Grid (2)' },
   { kind: 'masonry', icon: <Columns3 size={14} />, title: 'Masonry (3)' },
-  { kind: 'filmstrip', icon: <LayoutPanelTop size={14} />, title: 'Filmstrip (4)' }
+  { kind: 'filmstrip', icon: <LayoutPanelTop size={14} />, title: 'Filmstrip (4)' },
+  { kind: 'timeline', icon: <CalendarDays size={14} />, title: 'Timeline (Y)' }
 ]
 
 export function Toolbar(): React.JSX.Element {
@@ -68,16 +71,17 @@ export function Toolbar(): React.JSX.Element {
           </IconBtn>
         ))}
       </div>
-      <input
-        type="range"
-        min={100}
-        max={400}
-        step={10}
-        value={size}
-        onChange={(e) => setSize(Number(e.target.value))}
-        className="no-drag h-1 w-[90px] cursor-pointer appearance-none rounded bg-white/[0.12] accent-[var(--color-accent)] [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-fg"
-        title="Thumbnail size (- / =)"
-      />
+      <Tip label="Thumbnail size" shortcut="− / =">
+        <input
+          type="range"
+          min={100}
+          max={400}
+          step={10}
+          value={size}
+          onChange={(e) => setSize(Number(e.target.value))}
+          className="no-drag h-1 w-[90px] cursor-pointer appearance-none rounded bg-white/[0.12] accent-[var(--color-accent)] [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-fg"
+        />
+      </Tip>
       <div className="no-drag">
         <IconBtn title="Inspector (I)" active={inspector} onClick={toggleInspector}>
           {inspector ? <SidebarClose size={14} /> : <SidebarOpen size={14} />}
@@ -162,16 +166,17 @@ function LabelFilter(): React.JSX.Element {
         const l = Number(k)
         const on = labels.includes(l)
         return (
-          <button
-            key={k}
-            title={`${c.name} (${l === 5 ? 5 : l + 5})`}
-            onClick={() => toggle(l)}
-            className={cn(
-              'h-[14px] w-[14px] rounded-full transition-transform duration-150 ease-spring hover:scale-110',
-              on ? 'scale-110 ring-2 ring-white/80' : 'opacity-60 hover:opacity-100'
-            )}
-            style={{ background: c.hex }}
-          />
+          <Tip key={k} label={`${c.name} label`} shortcut={String(l === 5 ? 5 : l + 5)}>
+            <button
+              aria-label={`${c.name} label`}
+              onClick={() => toggle(l)}
+              className={cn(
+                'h-[14px] w-[14px] rounded-full transition-transform duration-150 ease-spring hover:scale-110',
+                on ? 'scale-110 ring-2 ring-white/80' : 'opacity-60 hover:opacity-100'
+              )}
+              style={{ background: c.hex }}
+            />
+          </Tip>
         )
       })}
     </div>
@@ -198,20 +203,20 @@ function ColorFilter(): React.JSX.Element {
   const setFilter = useLibrary((s) => s.setFilter)
   return (
     <Popover.Root>
-      <Popover.Trigger asChild>
-        <button
-          className="no-drag flex h-[30px] items-center gap-1.5 rounded-[7px] bg-white/[0.04] px-2 text-[12px] text-fg-2 hover:bg-white/[0.06] hover:text-fg"
-          title="Filter by color"
-        >
-          <span
-            className="h-3.5 w-3.5 rounded-full border border-white/20"
-            style={{
-              background: color ?? 'conic-gradient(#e11d48,#eab308,#22c55e,#3b82f6,#8b5cf6,#e11d48)'
-            }}
-          />
-          Color
-        </button>
-      </Popover.Trigger>
+      <Tip label="Filter by color">
+        <Popover.Trigger asChild>
+          <button className="no-drag flex h-[30px] items-center gap-1.5 rounded-[7px] bg-white/[0.04] px-2 text-[12px] text-fg-2 hover:bg-white/[0.06] hover:text-fg">
+            <span
+              className="h-3.5 w-3.5 rounded-full border border-white/20"
+              style={{
+                background:
+                  color ?? 'conic-gradient(#e11d48,#eab308,#22c55e,#3b82f6,#8b5cf6,#e11d48)'
+              }}
+            />
+            Color
+          </button>
+        </Popover.Trigger>
+      </Tip>
       <Popover.Portal>
         <Popover.Content
           sideOffset={6}

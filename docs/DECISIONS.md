@@ -31,3 +31,14 @@ Files on unmounted volumes remain browsable from cache with a badge; scan resync
 ## 2026-09-23 — exifr over exiftool
 
 exifr is pure JS, ~5 ms/file, covers EXIF essentials for TIFF-based RAW (ARW/NEF/DNG). exiftool-vendored kept as future fallback for exotic formats.
+
+## 2026-10-04 — Timeline view: sectioned justified grid + labelled scrubber
+
+Research (feedback #1):
+
+- **Apple Photos** — Years / Months / Days / All Photos as zoom levels; coarser levels summarise, Days is a dense grid with date headers. Zoom by pinch or Cmd+1..4.
+- **Google Photos (web)** — continuous grid with per-day headers; a right-edge scrubber that fades in on scroll/hover, shows year ticks, a floating date pill while hovering/dragging, and jumps on click/drag.
+- **Immich** (Svelte, not React) — same model: month buckets (`TimelineMonth`/`TimelineDay`), virtualised per bucket, sticky month/day headers, scrubber whose segment heights are proportional to each bucket's _rendered height_, not to elapsed time; label shows Month/Year while scrolling.
+- **Lightroom Classic / Capture One** — date tree (Year › Month › Day) in a side panel as a filter. Precise but slow to skim; we already have folder/filter UI for that.
+
+Chosen design (desktop + keyboard-first): Google/Immich model, no separate zoom screens. Layout `timeline` (key `Y`; `5` is taken by the purple label) = justified rows split into sections by `takenAt` (Day / Month / Year, `Auto` = by thumb size, `[` `]` to change), undated assets in a final "Unknown date" section. `computeLayout` takes optional `sections` and returns `headers`, so `navigate()`, `BoxIndex` and selection keep working unchanged. One absolutely positioned floating header (pushed up by the next header) instead of CSS sticky inside the virtual canvas. Scrubber maps pointer ↔ scroll offset linearly (like Immich), so ticks land where their section reaches the top and dragging is continuous; it fades from 40 % to 100 % on scroll/hover. Timeline order (takenAt desc, undated last) is applied client-side over the server order instead of rewriting `filter.sort`: works for any filter (similar-to, random), switching layouts never refetches 36k tiles, and leaving the timeline restores the server order.

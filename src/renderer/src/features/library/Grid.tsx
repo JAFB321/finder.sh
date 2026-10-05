@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLibrary } from './store'
-import { BoxIndex, computeLayout, navigate, type Box } from './layouts'
+import { BoxIndex, computeLayout, headerAt, navigate, type Box } from './layouts'
 import { Tile } from './Tile'
 import { invoke } from '@renderer/lib/api'
-import { debounce } from '@renderer/lib/utils'
+import { cn, debounce } from '@renderer/lib/utils'
+import { Scrubber } from '../timeline/Scrubber'
+import { SectionHeaderRow, GroupSwitch } from '../timeline/SectionHeader'
+import { groupByTime, resolveGroup, type TimeGroup } from '../timeline/sections'
 
 const GAP = 6
 const PAD = 12
 const OVERSCAN = 600
+const HEADER_H = 36
+const SECTION_GAP = 24
+/** extra right margin in the timeline so tiles never sit under the scrubber */
+const SCRUB_W = 28
+const GROUPS: TimeGroup[] = ['year', 'month', 'day']
 
 export function Grid(): React.JSX.Element {
   const ids = useLibrary((s) => s.ids)
@@ -20,6 +28,11 @@ export function Grid(): React.JSX.Element {
   const setCursor = useLibrary((s) => s.setCursor)
   const setLoupe = useLibrary((s) => s.setLoupe)
   const clearSelection = useLibrary((s) => s.clearSelection)
+  const groupSetting = useLibrary((s) => s.timelineGroup)
+  const setGroup = useLibrary((s) => s.setTimelineGroup)
+
+  const timeline = layout === 'timeline'
+  const group = resolveGroup(groupSetting, size)
 
   const scroller = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -44,22 +57,45 @@ export function Grid(): React.JSX.Element {
     [ids, tiles]
   )
 
+  const sections = useMemo(
+    () => (timeline ? groupByTime(ids, tiles, group) : null),
+    [timeline, ids, tiles, group]
+  )
+
+  const contentWidth = timeline ? width - (SCRUB_W - PAD) : width
   const result = useMemo(
     () =>
       computeLayout(items, {
         kind: layout === 'filmstrip' ? 'justified' : layout,
-        width,
+        width: contentWidth,
         size,
-        gap: GAP
+        gap: GAP,
+        sections: sections ?? undefined,
+        headerHeight: HEADER_H,
+        sectionGap: SECTION_GAP
       }),
-    [items, layout, width, size]
+    [items, layout, contentWidth, size, sections]
   )
+  const headers = useMemo(() => result.headers ?? [], [result])
   const index = useMemo(() => new BoxIndex(result.boxes), [result])
 
   const visible: Box[] = useMemo(
     () => index.visible(scroll.top - OVERSCAN, scroll.top + scroll.height + OVERSCAN),
     [index, scroll]
   )
+
+  // sticky header: the section whose header has scrolled past the top (or the first one)
+  const floating = Math.max(0, headerAt(headers, scroll.top - PAD))
+  const visibleHeaders = useMemo(() => {
+    if (!headers.length) return []
+    const from = Math.max(0, headerAt(headers, scroll.top - PAD - OVERSCAN))
+    const out: number[] = []
+    for (let k = from; k < headers.length; k++) {
+      if (headers[k].y > scroll.top + scroll.height + OVERSCAN) break
+      out.push(k)
+    }
+    return out
+  }, [headers, scroll])
 
   // tell main which assets are on screen so their jobs get priority
   const hint = useMemo(
@@ -72,12 +108,23 @@ export function Grid(): React.JSX.Element {
   )
   useEffect(() => hint(visible), [visible, hint])
 
+  // one state update per frame at most, however many scroll events fire
+  const raf = useRef(0)
   const onScroll = useCallback(() => {
-    const el = scroller.current!
-    setScroll({ top: el.scrollTop, height: el.clientHeight })
+    if (raf.current) return
+    raf.current = requestAnimationFrame(() => {
+      raf.current = 0
+      const el = scroller.current
+      if (el) setScroll({ top: el.scrollTop, height: el.clientHeight })
+    })
+  }, [])
+  useEffect(() => () => cancelAnimationFrame(raf.current), [])
+
+  const seek = useCallback((top: number) => {
+    scroller.current?.scrollTo({ top })
   }, [])
 
-  // keep cursor in view
+  // keep cursor in view (below the floating header in the timeline)
   useEffect(() => {
     if (cursor < 0) return
     const b = result.boxes[cursor]
@@ -85,10 +132,11 @@ export function Grid(): React.JSX.Element {
     if (!b || !el) return
     const top = b.y + PAD
     const bottom = top + b.h
-    if (top < el.scrollTop + 8) el.scrollTo({ top: top - 8, behavior: 'smooth' })
+    const margin = timeline ? HEADER_H + 8 : 8
+    if (top < el.scrollTop + margin) el.scrollTo({ top: top - margin, behavior: 'smooth' })
     else if (bottom > el.scrollTop + el.clientHeight - 8)
       el.scrollTo({ top: bottom - el.clientHeight + 8, behavior: 'smooth' })
-  }, [cursor, result])
+  }, [cursor, result, timeline])
 
   // keyboard navigation
   useEffect(() => {
@@ -108,6 +156,12 @@ export function Grid(): React.JSX.Element {
         if (next >= 0) select(next, e.shiftKey ? 'range' : 'single')
         return
       }
+      if (timeline && (e.key === '[' || e.key === ']') && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        const k = GROUPS.indexOf(group) + (e.key === '[' ? -1 : 1)
+        if (k >= 0 && k < GROUPS.length) setGroup(GROUPS[k])
+        return
+      }
       if ((e.key === ' ' || e.key === 'Enter') && cursor >= 0) {
         e.preventDefault()
         setLoupe(true)
@@ -120,7 +174,7 @@ export function Grid(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [result, cursor, select, setLoupe, clearSelection])
+  }, [result, cursor, select, setLoupe, clearSelection, timeline, group, setGroup])
 
   const onTileDown = useCallback(
     (i: number, e: React.MouseEvent) => {
@@ -136,45 +190,101 @@ export function Grid(): React.JSX.Element {
     [select, selected, ids]
   )
 
+  // floating header: sticks at the top, pushed up by the next section's header
+  let floatTop = 0
+  if (timeline && headers.length) {
+    const cur = headers[floating]
+    floatTop = Math.max(0, PAD + cur.y - scroll.top)
+    const next = headers[floating + 1]
+    if (next) floatTop += Math.min(0, PAD + next.y - scroll.top - HEADER_H)
+  }
+
   const contain = layout === 'grid'
+  const maxScroll = Math.max(0, result.height + PAD * 2 - scroll.height)
   return (
-    <div
-      ref={scroller}
-      onScroll={onScroll}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget || (e.target as HTMLElement).dataset.canvas)
-          clearSelection()
-      }}
-      className="relative h-full w-full overflow-y-auto overflow-x-hidden"
-    >
+    <div className="relative h-full w-full">
       <div
-        data-canvas="1"
-        className="relative"
-        style={{ height: result.height + PAD * 2, margin: `0 ${PAD}px` }}
+        ref={scroller}
+        data-scroller=""
+        onScroll={onScroll}
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget || (e.target as HTMLElement).dataset.canvas)
+            clearSelection()
+        }}
+        className={cn(
+          'relative h-full w-full overflow-y-auto overflow-x-hidden',
+          // the scrubber replaces the native scrollbar
+          timeline && '[scrollbar-width:none]'
+        )}
       >
-        <div data-canvas="1" className="absolute inset-x-0" style={{ top: PAD }}>
-          {visible.map((b) => (
-            <Tile
-              key={b.id}
-              id={b.id}
-              tile={tiles.get(b.id)}
-              x={b.x}
-              y={b.y}
-              w={b.w}
-              h={b.h}
-              contain={contain}
-              selected={selected.has(b.id)}
-              focused={cursor === b.i}
-              onMouseDown={(e) => onTileDown(b.i, e)}
-              onDoubleClick={() => {
-                setCursor(b.i)
-                setLoupe(true)
-              }}
-            />
-          ))}
+        <div
+          data-canvas="1"
+          className="relative"
+          style={{
+            height: result.height + PAD * 2,
+            marginLeft: PAD,
+            marginRight: timeline ? SCRUB_W : PAD
+          }}
+        >
+          <div data-canvas="1" className="absolute inset-x-0" style={{ top: PAD }}>
+            {timeline &&
+              visibleHeaders.map((k) =>
+                k === floating ? null : (
+                  <SectionHeaderRow
+                    key={`h${headers[k].firstIndex}`}
+                    label={headers[k].label}
+                    count={headers[k].count}
+                    className="absolute inset-x-0"
+                    style={{ top: headers[k].y, height: HEADER_H }}
+                  />
+                )
+              )}
+            {visible.map((b) => (
+              <Tile
+                key={b.id}
+                id={b.id}
+                tile={tiles.get(b.id)}
+                x={b.x}
+                y={b.y}
+                w={b.w}
+                h={b.h}
+                contain={contain}
+                selected={selected.has(b.id)}
+                focused={cursor === b.i}
+                onMouseDown={(e) => onTileDown(b.i, e)}
+                onDoubleClick={() => {
+                  setCursor(b.i)
+                  setLoupe(true)
+                }}
+              />
+            ))}
+          </div>
         </div>
+        {!ids.length && <Empty />}
       </div>
-      {!ids.length && <Empty />}
+      {timeline && headers.length > 0 && (
+        <>
+          <SectionHeaderRow
+            label={headers[floating].label}
+            count={headers[floating].count}
+            floating
+            className="absolute left-0 z-10"
+            style={{ top: floatTop, right: SCRUB_W, height: HEADER_H, paddingLeft: PAD }}
+          >
+            <GroupSwitch value={groupSetting} effective={group} onChange={setGroup} />
+          </SectionHeaderRow>
+          <Scrubber
+            headers={headers}
+            sections={sections ?? []}
+            group={group}
+            contentTop={PAD}
+            scrollTop={scroll.top}
+            maxScroll={maxScroll}
+            viewHeight={scroll.height}
+            onSeek={seek}
+          />
+        </>
+      )}
     </div>
   )
 }

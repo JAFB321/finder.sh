@@ -14,6 +14,8 @@
 | `Cmd+K`           | Command palette                                |
 | `Cmd+F`           | Focus search                                   |
 | `1 2 3 4`         | Layout: justified / grid / masonry / filmstrip |
+| `Y`               | Layout: timeline                               |
+| `[` `]`           | Timeline: coarser / finer groups (year–day)    |
 | `-` `=`           | Thumb size down / up                           |
 | `S`               | Show similar to selected                       |
 | `D`               | Show duplicates of selected                    |

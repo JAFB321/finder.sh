@@ -22,6 +22,23 @@ export interface LayoutResult {
   height: number
   /** for row-based layouts, index of first box of each row (used for keyboard nav) */
   rows?: number[]
+  /** sectioned layouts only: one header per section, in order */
+  headers?: SectionHeader[]
+}
+
+/** A run of consecutive items starting at `start` (sections must be sorted by start). */
+export interface LayoutSection {
+  start: number
+  label: string
+}
+
+export interface SectionHeader {
+  /** top of the header row; the section's first box starts at y + headerHeight */
+  y: number
+  label: string
+  count: number
+  /** index of the section's first item */
+  firstIndex: number
 }
 
 export interface LayoutOptions {
@@ -30,13 +47,18 @@ export interface LayoutOptions {
   /** target row height (justified) / cell size (grid) / column width (masonry) */
   size: number
   gap: number
+  /** when set, items are laid out per section (justified rows) below a header row */
+  sections?: LayoutSection[]
+  headerHeight?: number
+  sectionGap?: number
 }
 
 const DEFAULT_AR = 3 / 2
 const ar = (it: LayoutItem): number => (it.ar > 0 ? Math.min(Math.max(it.ar, 0.2), 5) : DEFAULT_AR)
 
 export function computeLayout(items: LayoutItem[], o: LayoutOptions): LayoutResult {
-  if (!items.length || o.width <= 0) return { boxes: [], height: 0, rows: [] }
+  if (!items.length || o.width <= 0) return { boxes: [], height: 0, rows: [], headers: [] }
+  if (o.sections?.length) return sectioned(items, o, o.sections)
   switch (o.kind) {
     case 'grid':
       return grid(items, o)
@@ -82,6 +104,46 @@ function justified(items: LayoutItem[], o: LayoutOptions): LayoutResult {
   }
   flush(items.length, true)
   return { boxes, height: Math.max(0, y - gap), rows }
+}
+
+/** Justified rows per section, each preceded by a header row. Box order == item order. */
+function sectioned(items: LayoutItem[], o: LayoutOptions, sections: LayoutSection[]): LayoutResult {
+  const headerH = o.headerHeight ?? 36
+  const sectionGap = o.sectionGap ?? 24
+  const boxes: Box[] = []
+  const rows: number[] = []
+  const headers: SectionHeader[] = []
+  let y = 0
+  for (let k = 0; k < sections.length; k++) {
+    const start = sections[k].start
+    const end = k + 1 < sections.length ? sections[k + 1].start : items.length
+    if (end <= start) continue
+    if (headers.length) y += sectionGap
+    headers.push({ y, label: sections[k].label, count: end - start, firstIndex: start })
+    const top = y + headerH
+    const r = justified(items.slice(start, end), o)
+    const offset = boxes.length
+    for (const b of r.boxes)
+      boxes.push({ id: b.id, x: b.x, y: b.y + top, w: b.w, h: b.h, i: b.i + start })
+    for (const row of r.rows!) rows.push(row + offset)
+    y = top + r.height
+  }
+  return { boxes, height: y, rows, headers }
+}
+
+/** Index of the last header whose y <= top (headers sorted by y); -1 if none. */
+export function headerAt(headers: SectionHeader[], top: number): number {
+  let lo = 0
+  let hi = headers.length - 1
+  let ans = -1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (headers[mid].y <= top) {
+      ans = mid
+      lo = mid + 1
+    } else hi = mid - 1
+  }
+  return ans
 }
 
 /** Uniform square cells, image letterboxed (contain) inside by the renderer. */
