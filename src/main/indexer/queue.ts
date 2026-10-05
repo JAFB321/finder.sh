@@ -1,12 +1,15 @@
 import { cpus } from 'os'
 import { join } from 'path'
 import type { AssetMeta, DominantColor, IndexProgress, JobKind } from '@shared/types'
+import { VIDEO_EXTS } from '@shared/types'
 import { WorkerPool } from './pool'
 import * as jobs from '../db/jobs'
 import * as assets from '../db/assets'
 import { paths, thumbPath } from '../paths'
 import { isScanning } from './scanner'
 import { existsSync } from 'fs'
+import { resolveFfmpeg } from '../services/ffmpeg'
+import { getConfig } from '../config'
 
 export interface QueueEvents {
   onAssetsUpdated: (ids: number[]) => void
@@ -44,8 +47,11 @@ export class IndexQueue {
 
   constructor(private ev: QueueEvents) {
     const n = Math.max(2, cpus().length - 2)
+    const ff = resolveFfmpeg()
     this.pool = new WorkerPool(join(__dirname, 'workers/indexer.js'), n, 2, {
-      thumbsDir: paths.thumbs
+      thumbsDir: paths.thumbs,
+      ffmpeg: ff?.ffmpeg ?? null,
+      ffprobe: ff?.ffprobe ?? null
     })
     this.embedPool = new WorkerPool(join(__dirname, 'workers/embed.js'), 1, 4, {
       modelsDir: paths.models
@@ -119,7 +125,10 @@ export class IndexQueue {
     if (!p?.hash) return null
     const out = thumbPath(p.hash, size)
     if (existsSync(out)) return out
+    const isVideo = VIDEO_EXTS.has(p.ext)
+    if (isVideo && !getConfig().indexVideos) return null
     try {
+      const m = metaOf(assetId)
       await this.pool.run({
         kind: 'thumb',
         assetId,
@@ -128,7 +137,9 @@ export class IndexQueue {
         isRaw: p.isRaw,
         hash: p.hash,
         sizes: [size],
-        orientation: orientationOf(assetId)
+        orientation: m.orientation,
+        isVideo,
+        duration: m.duration
       })
       return existsSync(out) ? out : null
     } catch {
@@ -171,10 +182,28 @@ export class IndexQueue {
     }
   }
 
+  /** Toggle video indexing; turning it on re-queues every video's thumb pipeline. */
+  setIndexVideos(on: boolean): void {
+    if (!on) return
+    const ids = assets.videoAssetIds()
+    if (!ids.length) return
+    jobs.enqueue(ids, ['thumb', 'visual', 'embed'])
+    this.poke()
+  }
+
   private async dispatch(kind: JobKind, assetId: number): Promise<void> {
     const p = assets.primaryPath(assetId)
     if (!p) {
       jobs.complete(assetId, kind, 'no primary file')
+      return
+    }
+    const isVideo = VIDEO_EXTS.has(p.ext)
+    if (isVideo && kind !== 'meta' && !getConfig().indexVideos) {
+      // Skipped, not failed: thumb-dependent jobs are closed too so they don't fail on a missing file.
+      for (const k of ['thumb', 'visual', 'embed'] as JobKind[]) jobs.complete(assetId, k)
+      assets.writeThumbState(assetId, -1)
+      this.markUpdated(assetId)
+      this.loop()
       return
     }
     try {
@@ -185,7 +214,8 @@ export class IndexQueue {
             assetId,
             path: p.path,
             ext: p.ext,
-            isRaw: p.isRaw
+            isRaw: p.isRaw,
+            isVideo
           })
           assets.writeMeta(assetId, r.meta, r.hash)
           break
@@ -193,6 +223,7 @@ export class IndexQueue {
         case 'thumb': {
           const hash = p.hash ?? assets.primaryPath(assetId)?.hash
           if (!hash) throw new Error('no hash')
+          const m = metaOf(assetId)
           const r = await this.pool.run<ThumbResult>({
             kind,
             assetId,
@@ -201,7 +232,9 @@ export class IndexQueue {
             isRaw: p.isRaw,
             hash,
             sizes: [1024, 256],
-            orientation: orientationOf(assetId)
+            orientation: m.orientation,
+            isVideo,
+            duration: m.duration
           })
           assets.writeThumbState(assetId, 1, r.width, r.height)
           break
@@ -250,7 +283,7 @@ export class IndexQueue {
   }
 }
 
-function orientationOf(assetId: number): number {
-  const d = assets.detail(assetId)
-  return d?.meta?.orientation ?? 1
+function metaOf(assetId: number): { orientation: number; duration: number | null } {
+  const m = assets.detail(assetId)?.meta
+  return { orientation: m?.orientation ?? 1, duration: m?.duration ?? null }
 }

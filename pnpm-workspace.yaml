@@ -7,6 +7,7 @@ allowBuilds:
   onnxruntime-node: true
   protobufjs: false
   sharp: true
+  ffmpeg-static: true
   '@huggingface/transformers': true
 
 packages:

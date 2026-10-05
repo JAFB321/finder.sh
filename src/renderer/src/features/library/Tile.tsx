@@ -36,6 +36,7 @@ export const Tile = memo(function Tile({
   const label = tile?.label ?? 0
   const offline = !!(tile && tile.flags & (AssetFlag.Offline | AssetFlag.Missing))
   const pair = !!(tile && tile.flags & AssetFlag.Pair)
+  const video = !!(tile && tile.flags & AssetFlag.Video)
   return (
     <div
       data-id={id}
@@ -86,6 +87,14 @@ export const Tile = memo(function Tile({
           RAW+JPG
         </span>
       )}
+      {video && (
+        <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-[3px] bg-black/60 px-1 py-[1px] text-[9px] font-medium tabular-nums text-white/85 backdrop-blur">
+          <svg viewBox="0 0 8 8" className="h-[7px] w-[7px] fill-current" aria-hidden>
+            <path d="M1.5 0.8v6.4L7 4z" />
+          </svg>
+          {tile?.dur != null && formatDuration(tile.dur)}
+        </span>
+      )}
       {offline && (
         <span className="absolute bottom-1.5 right-1.5 rounded-[3px] bg-black/60 px-1 py-[1px] text-[9px] text-white/70">
           offline
@@ -94,3 +103,11 @@ export const Tile = memo(function Tile({
     </div>
   )
 })
+
+function formatDuration(sec: number): string {
+  const t = Math.max(0, Math.round(sec))
+  const h = Math.floor(t / 3600)
+  const m = Math.floor((t % 3600) / 60)
+  const ss = String(t % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}

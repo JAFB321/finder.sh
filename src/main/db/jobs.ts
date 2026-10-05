@@ -82,10 +82,17 @@ export function resetRunning(): void {
   const d = getDb()
   d.prepare(`UPDATE jobs SET state = 'pending' WHERE state = 'running'`).run()
   // give failed jobs another chance each launch (transient errors: model not yet downloaded, drive busy)
-  d.prepare(`UPDATE jobs SET state = 'pending', attempts = 0 WHERE state = 'failed'`).run()
+  retryFailed()
 }
 
-export function counts(): Pick<IndexProgress, 'pending' | 'done' | 'failed'> {
+/** Failed jobs back to pending with a fresh attempt budget. Returns how many were reset. */
+export function retryFailed(): number {
+  return getDb()
+    .prepare(`UPDATE jobs SET state = 'pending', attempts = 0, error = NULL WHERE state = 'failed'`)
+    .run().changes
+}
+
+export function counts(): Pick<IndexProgress, 'pending' | 'done' | 'failed' | 'failures'> {
   const rows = getDb()
     .prepare(`SELECT kind, state, COUNT(*) AS n FROM jobs GROUP BY kind, state`)
     .all() as {
@@ -100,5 +107,40 @@ export function counts(): Pick<IndexProgress, 'pending' | 'done' | 'failed'> {
     else if (r.state === 'done') out.done[r.kind] += r.n
     else if (r.state === 'failed') out.failed[r.kind] += r.n
   }
-  return out
+  const anyFailed = JOB_KINDS.some((k) => out.failed[k] > 0)
+  if (!anyFailed) return { ...out, failures: [] }
+  // Jobs downstream of a failed one can never be claimed (see claim()); they are not "pending".
+  const blocked = getDb()
+    .prepare(
+      `SELECT j.kind, COUNT(DISTINCT j.asset_id) AS n FROM jobs u
+       JOIN jobs j ON j.asset_id = u.asset_id AND j.state = 'pending'
+       WHERE u.state = 'failed' AND (
+         (j.kind = 'thumb' AND u.kind = 'meta') OR
+         (j.kind IN ('visual', 'embed') AND u.kind IN ('meta', 'thumb')))
+       GROUP BY j.kind`
+    )
+    .all() as { kind: JobKind; n: number }[]
+  for (const b of blocked) out.pending[b.kind] = Math.max(0, out.pending[b.kind] - b.n)
+  return { ...out, failures: failureBreakdown() }
+}
+
+function failureBreakdown(): IndexProgress['failures'] {
+  const rows = getDb()
+    .prepare(
+      `SELECT kind, error, COUNT(*) AS count FROM jobs WHERE state = 'failed' GROUP BY kind, error`
+    )
+    .all() as { kind: JobKind; error: string | null; count: number }[]
+  // messages often embed the file path; strip it so identical causes group together
+  const merged = new Map<string, IndexProgress['failures'][number]>()
+  for (const r of rows) {
+    const error = (r.error ?? 'unknown error')
+      .replace(/(['"`])\/[^'"`]*\1/g, '…')
+      .replace(/(^|\s)\/\S+/g, '$1…')
+      .slice(0, 160)
+    const key = `${r.kind}\0${error}`
+    const m = merged.get(key)
+    if (m) m.count += r.count
+    else merged.set(key, { kind: r.kind, error, count: r.count })
+  }
+  return [...merged.values()].sort((a, b) => b.count - a.count).slice(0, 5)
 }

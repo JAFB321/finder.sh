@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronRight, FolderPlus, HardDrive, Layers, RefreshCw, Trash2, Copy } from 'lucide-react'
+import {
+  Aperture,
+  ChevronRight,
+  FolderPlus,
+  HardDrive,
+  Layers,
+  RefreshCw,
+  Trash2,
+  Copy
+} from 'lucide-react'
 import type { Collection, IndexProgress, Root } from '@shared/types'
-import type { FolderNode } from '@shared/ipc'
+import type { DuplicatesProgress, FolderNode } from '@shared/ipc'
 import { invoke, usePush } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
+import { Tip } from '@renderer/components/ui/Tooltip'
 import { useLibrary } from '../library/store'
+import { useIntegrations } from './useIntegrations'
+
+const fmt = (n: number): string => n.toLocaleString('en-US')
 
 export function Sidebar(): React.JSX.Element {
   const [roots, setRoots] = useState<Root[]>([])
@@ -29,6 +42,8 @@ export function Sidebar(): React.JSX.Element {
   const refresh = useCallback(() => setTick((t) => t + 1), [])
   usePush('roots:changed', refresh, [refresh])
   usePush('library:changed', refresh, [refresh])
+  const [hashing, setHashing] = useState<DuplicatesProgress | null>(null)
+  usePush('duplicates:progress', setHashing)
 
   const allActive = !filter.rootId && !filter.dir && !filter.collectionId && !filter.duplicatesOnly
 
@@ -55,6 +70,9 @@ export function Sidebar(): React.JSX.Element {
             active={!!filter.duplicatesOnly}
             icon={<Copy size={14} />}
             label="Duplicates"
+            hint={
+              hashing?.running ? `hashing ${fmt(hashing.done)}/${fmt(hashing.total)}` : undefined
+            }
             onClick={() =>
               setFilter({
                 duplicatesOnly: !filter.duplicatesOnly || undefined,
@@ -108,6 +126,7 @@ function RootItem({ root }: { root: Root }): React.JSX.Element {
     if (open) void invoke('roots:folders', { rootId: root.id }).then(setTree)
   }, [open, root.id, root.fileCount])
   const active = filter.rootId === root.id && !filter.dir
+  const lightroom = useIntegrations()?.lightroom
   return (
     <div>
       <div
@@ -141,6 +160,14 @@ function RootItem({ root }: { root: Root }): React.JSX.Element {
         </button>
         <span className="text-[11px] tabular-nums text-fg-3">{root.fileCount}</span>
         <div className="hidden gap-0.5 group-hover:flex">
+          {lightroom && root.online && (
+            <IconBtn
+              title="Open in Lightroom"
+              onClick={() => void invoke('roots:openFolderInLightroom', { path: root.path })}
+            >
+              <Aperture size={12} />
+            </IconBtn>
+          )}
           <IconBtn title="Rescan" onClick={() => void invoke('roots:rescan', { id: root.id })}>
             <RefreshCw size={12} />
           </IconBtn>
@@ -172,11 +199,12 @@ function FolderRow({ node, depth }: { node: FolderNode; depth: number }): React.
   const [open, setOpen] = useState(false)
   const active = filter.dir === node.path
   const has = node.children.length > 0
+  const lightroom = useIntegrations()?.lightroom
   return (
     <div>
       <div
         className={cn(
-          'flex h-[24px] items-center gap-1 rounded-[5px] pr-1 text-[12px] hover:bg-white/[0.04]',
+          'group flex h-[24px] items-center gap-1 rounded-[5px] pr-1 text-[12px] hover:bg-white/[0.04]',
           active && 'bg-white/[0.07] text-fg'
         )}
         style={{ paddingLeft: depth * 10 + 2 }}
@@ -199,7 +227,20 @@ function FolderRow({ node, depth }: { node: FolderNode; depth: number }): React.
         >
           {node.name}
         </button>
-        <span className="text-[10.5px] tabular-nums text-fg-3">{node.count}</span>
+        <span className="text-[10.5px] tabular-nums text-fg-3 group-hover:hidden">
+          {node.count}
+        </span>
+        {lightroom && (
+          <div className="hidden group-hover:flex">
+            <IconBtn
+              title="Open in Lightroom"
+              size="sm"
+              onClick={() => void invoke('roots:openFolderInLightroom', { path: node.path })}
+            >
+              <Aperture size={11} />
+            </IconBtn>
+          </div>
+        )}
       </div>
       {open && node.children.map((c) => <FolderRow key={c.path} node={c} depth={depth + 1} />)}
     </div>
@@ -215,12 +256,16 @@ function Progress(): React.JSX.Element | null {
   usePush('model:download', (m) => setModel(m))
   useEffect(() => void invoke('index:progress', undefined).then(setP), [])
   if (!p) return null
-  const pending = Object.values(p.pending).reduce((a, b) => a + b, 0)
-  const done = Object.values(p.done).reduce((a, b) => a + b, 0)
-  const total = pending + done
+  const sum = (r: Record<string, number>): number => Object.values(r).reduce((a, b) => a + b, 0)
+  const pending = sum(p.pending)
+  const done = sum(p.done)
+  const failed = sum(p.failed)
+  const total = pending + done + failed
   const busy = p.scanning || pending > 0
   const modelBusy = model && !model.done
-  if (!busy && !modelBusy) return null
+  // one meta job per asset, so this is the number of photos/videos the index knows about
+  const assets = p.pending.meta + p.done.meta + p.failed.meta
+  if (!busy && !modelBusy && !assets) return null
   return (
     <div className="border-t border-line px-3 py-2 text-[11px] text-fg-2">
       {p.scanning && (
@@ -234,13 +279,13 @@ function Progress(): React.JSX.Element | null {
           <div className="flex justify-between">
             <span>Indexing</span>
             <span className="tabular-nums text-fg-3">
-              {done}/{total} · {p.rate.toFixed(0)}/s
+              {done + failed}/{total} · {p.rate.toFixed(0)}/s
             </span>
           </div>
           <div className="mt-1 h-[3px] overflow-hidden rounded bg-white/[0.06]">
             <div
               className="h-full rounded bg-accent transition-[width] duration-500"
-              style={{ width: `${total ? (done / total) * 100 : 0}%` }}
+              style={{ width: `${total ? ((done + failed) / total) * 100 : 0}%` }}
             />
           </div>
           <div className="mt-1 flex gap-2 text-[10px] text-fg-3">
@@ -251,6 +296,22 @@ function Progress(): React.JSX.Element | null {
           </div>
         </>
       )}
+      {!busy && (
+        <div className="flex items-center gap-1 text-fg-3">
+          <span className="tabular-nums">Indexed · {fmt(assets)}</span>
+          {failed > 0 && (
+            <>
+              <span>·</span>
+              <FailedBadge failed={failed} failures={p.failures} />
+            </>
+          )}
+        </div>
+      )}
+      {pending > 0 && failed > 0 && (
+        <div className="mt-1 flex items-center gap-1 text-fg-3">
+          <FailedBadge failed={failed} failures={p.failures} />
+        </div>
+      )}
       {modelBusy && (
         <div className="mt-1 flex justify-between">
           <span>Downloading AI model</span>
@@ -260,6 +321,54 @@ function Progress(): React.JSX.Element | null {
         </div>
       )}
     </div>
+  )
+}
+
+const KIND_LABEL: Record<string, string> = {
+  meta: 'metadata',
+  thumb: 'thumbnail',
+  visual: 'colors',
+  embed: 'AI'
+}
+
+function FailedBadge({
+  failed,
+  failures
+}: {
+  failed: number
+  failures: IndexProgress['failures']
+}): React.JSX.Element {
+  return (
+    <>
+      <Tip
+        side="top"
+        label={
+          <div className="max-w-[300px] py-0.5">
+            <div className="mb-1 text-fg-2">Failed jobs by cause</div>
+            {failures.map((f) => (
+              <div key={`${f.kind}:${f.error}`} className="flex gap-2 leading-snug">
+                <span className="min-w-0 flex-1">
+                  <span className="text-fg-3">{KIND_LABEL[f.kind] ?? f.kind}: </span>
+                  {f.error}
+                </span>
+                <span className="tabular-nums text-fg-3">{fmt(f.count)}</span>
+              </div>
+            ))}
+          </div>
+        }
+      >
+        <span className="cursor-default tabular-nums text-danger/80 underline decoration-dotted underline-offset-2">
+          {fmt(failed)} failed
+        </span>
+      </Tip>
+      <span className="text-fg-3">·</span>
+      <button
+        className="text-fg-3 underline-offset-2 hover:text-fg hover:underline"
+        onClick={() => void invoke('index:retryFailed', undefined)}
+      >
+        Retry
+      </button>
+    </>
   )
 }
 
@@ -290,12 +399,15 @@ function Row({
   icon,
   label,
   count,
+  hint,
   onClick
 }: {
   active: boolean
   icon: React.ReactNode
   label: string
   count?: number
+  /** dimmed status text after the label */
+  hint?: string
   onClick: () => void
 }): React.JSX.Element {
   return (
@@ -307,7 +419,10 @@ function Row({
       )}
     >
       <span className="flex w-4 justify-center text-fg-3">{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate">
+        {label}
+        {hint && <span className="ml-1.5 text-[10.5px] tabular-nums text-fg-3">{hint}</span>}
+      </span>
       {count != null && <span className="text-[11px] tabular-nums text-fg-3">{count}</span>}
     </button>
   )
@@ -315,25 +430,36 @@ function Row({
 
 export function IconBtn({
   title,
+  shortcut,
   onClick,
   children,
-  active
+  active,
+  size = 'md'
 }: {
+  /** tooltip text (also the accessible name) */
   title: string
+  shortcut?: string
   onClick: () => void
   children: React.ReactNode
   active?: boolean
+  size?: 'sm' | 'md'
 }): React.JSX.Element {
+  // "Grid (2)" -> label "Grid", shortcut "2", so callers can keep compact titles
+  const m = shortcut ? null : /^(.*\S)\s+\(([^()]{1,6})\)$/.exec(title)
+  const label = m ? m[1] : title
   return (
-    <button
-      title={title}
-      onClick={onClick}
-      className={cn(
-        'flex h-6 w-6 items-center justify-center rounded-[5px] text-fg-3 transition-colors hover:bg-white/[0.06] hover:text-fg',
-        active && 'bg-white/[0.09] text-fg'
-      )}
-    >
-      {children}
-    </button>
+    <Tip label={label} shortcut={m ? m[2] : shortcut}>
+      <button
+        aria-label={label}
+        onClick={onClick}
+        className={cn(
+          'flex items-center justify-center rounded-[5px] text-fg-3 transition-colors hover:bg-white/[0.06] hover:text-fg',
+          size === 'sm' ? 'h-5 w-5' : 'h-6 w-6',
+          active && 'bg-white/[0.09] text-fg'
+        )}
+      >
+        {children}
+      </button>
+    </Tip>
   )
 }

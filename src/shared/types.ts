@@ -27,6 +27,8 @@ export interface AssetTile {
   /** bit flags: 1 raw+jpg pair, 2 offline, 4 missing, 8 video */
   flags: number
   takenAt: number | null
+  /** video duration in seconds; null for stills or when unknown */
+  dur: number | null
 }
 
 export const AssetFlag = {
@@ -70,6 +72,8 @@ export interface AssetMeta {
   shutter: number | null
   lat: number | null
   lon: number | null
+  /** seconds, videos only */
+  duration: number | null
 }
 
 export interface DominantColor {
@@ -80,7 +84,7 @@ export interface DominantColor {
   weight: number
 }
 
-export type LayoutKind = 'justified' | 'grid' | 'masonry' | 'filmstrip'
+export type LayoutKind = 'justified' | 'grid' | 'masonry' | 'filmstrip' | 'timeline'
 
 export type SortKey = 'takenAt' | 'name' | 'mtime' | 'size' | 'random'
 
@@ -96,7 +100,7 @@ export interface LibraryFilter {
   color?: string
   /** asset id: rank by CLIP similarity */
   similarTo?: number
-  /** show only assets that belong to a near-duplicate cluster */
+  /** show only duplicates: same base filename in another folder, or identical bytes */
   duplicatesOnly?: boolean
   includeOffline?: boolean
   sort?: SortKey
@@ -122,6 +126,8 @@ export interface IndexProgress {
   pending: Record<JobKind, number>
   done: Record<JobKind, number>
   failed: Record<JobKind, number>
+  /** failed jobs grouped by kind + error message, most frequent first (top 5) */
+  failures: { kind: JobKind; error: string; count: number }[]
   /** assets/sec over last 5s */
   rate: number
 }
@@ -171,3 +177,9 @@ export const RAW_EXTS = new Set([
   'raw'
 ])
 export const VIDEO_EXTS = new Set(['mp4', 'mov', 'm4v', 'avi', 'mkv'])
+
+/** Persisted app settings (`<data>/config.json`). */
+export interface AppConfig {
+  /** extract a poster frame + duration from videos with ffmpeg */
+  indexVideos: boolean
+}

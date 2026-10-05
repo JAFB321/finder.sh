@@ -1,6 +1,7 @@
 // IPC contract. Single source of truth for main <-> renderer communication.
 // Add here first, then implement handler in src/main/ipc/*, then it is auto-typed in window.api.
 import type {
+  AppConfig,
   AssetDetail,
   AssetTile,
   Collection,
@@ -20,6 +21,14 @@ export interface FolderNode {
 
 export interface DuplicateCluster {
   ids: number[]
+  /** 'name': same base filename in different folders; 'bytes': identical file contents */
+  reason: 'name' | 'bytes'
+}
+
+export interface DuplicatesProgress {
+  done: number
+  total: number
+  running: boolean
 }
 
 /** request -> response. Renderer calls `api.invoke('name', arg)`. */
@@ -29,6 +38,7 @@ export interface Invoke {
   'roots:remove': { arg: { id: number }; res: void }
   'roots:rescan': { arg: { id?: number }; res: void }
   'roots:folders': { arg: { rootId: number }; res: FolderNode }
+  'roots:openFolderInLightroom': { arg: { path: string }; res: void }
 
   'library:query': {
     arg: { filter: LibraryFilter; offset: number; limit: number }
@@ -41,6 +51,7 @@ export interface Invoke {
   'library:duplicates': { arg: { filter: LibraryFilter }; res: DuplicateCluster[] }
   'library:reveal': { arg: { id: number }; res: void }
   'library:openExternal': { arg: { id: number }; res: void }
+  'library:openInLightroom': { arg: { ids: number[] }; res: void }
 
   'tags:setLabel': { arg: { ids: number[]; label: number }; res: void }
   'tags:keywords': { arg: { prefix?: string }; res: Keyword[] }
@@ -56,10 +67,17 @@ export interface Invoke {
 
   'index:progress': { arg: void; res: IndexProgress }
   'index:pause': { arg: { paused: boolean }; res: void }
+  /** failed jobs go back to pending and the queue is woken */
+  'index:retryFailed': { arg: void; res: void }
 
   'colors:palette': { arg: { filter: LibraryFilter }; res: DominantColor[] }
 
   'app:paths': { arg: void; res: { data: string; cache: string; db: string } }
+
+  'settings:get': { arg: void; res: AppConfig }
+  'settings:set': { arg: { patch: Partial<AppConfig> }; res: AppConfig }
+  /** installed third-party apps; null = not installed (UI hides the action) */
+  'app:integrations': { arg: void; res: { lightroom: string | null } }
 }
 
 /** main -> renderer push events. Renderer subscribes with `api.on('name', cb)`. */
@@ -71,6 +89,8 @@ export interface Push {
   'library:changed': { rootId: number | null }
   'roots:changed': void
   'model:download': { name: string; progress: number; done: boolean; error?: string }
+  /** background full-file hashing for byte-identical duplicate detection */
+  'duplicates:progress': DuplicatesProgress
 }
 
 export type InvokeName = keyof Invoke

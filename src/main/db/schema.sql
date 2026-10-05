@@ -28,8 +28,11 @@ CREATE TABLE IF NOT EXISTS files (
   size INTEGER NOT NULL,
   mtime INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'ok',  -- ok | missing | offline
-  seen_scan INTEGER NOT NULL DEFAULT 0
+  seen_scan INTEGER NOT NULL DEFAULT 0,
+  full_hash TEXT,               -- sha1 of whole file, lazily computed for byte-duplicate detection
+  quick_hash TEXT               -- sha1 of first+last 64 KB; pre-filter before full_hash
 );
+-- idx_files_size_hash (size, full_hash) is created in db/assets.ts ensureFullHash(): older DBs gain the columns via ALTER there.
 CREATE INDEX IF NOT EXISTS idx_files_root_dir ON files(root_id, dir);
 CREATE INDEX IF NOT EXISTS idx_files_asset ON files(asset_id);
 CREATE INDEX IF NOT EXISTS idx_files_pair ON files(dir, base);
@@ -68,7 +71,8 @@ CREATE TABLE IF NOT EXISTS asset_meta (
   aperture REAL,
   shutter REAL,
   lat REAL,
-  lon REAL
+  lon REAL,
+  duration REAL                 -- seconds, videos only
 );
 
 CREATE TABLE IF NOT EXISTS asset_visual (

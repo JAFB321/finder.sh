@@ -65,7 +65,8 @@ logs/
 - Text: FTS5 (filename, folder path segments, keywords) merged with CLIP text→image when query has ≥ 2 words or no FTS hits.
 - Color: query color → Lab; rank by min ΔE against each asset's top-5 dominant colors weighted.
 - Similar: `vec_clip` KNN (cosine) top 100, fallback to pHash hamming ≤ 10 when embeddings missing.
-- Duplicates: pHash hamming ≤ 6 clustered by union-find, computed lazily per current filter set.
+- Duplicates: same base filename across folders (case-insensitive, ext ignored) OR identical bytes. Byte check: same size → `quick_hash` (first+last 64 KB) → full sha1 (`files.full_hash`), hashed lazily in the background (4 concurrent) with `duplicates:progress` pushes. pHash is only the fallback for "Similar to" when no CLIP embedding exists.
+- Videos: ffmpeg frame at 10 % of duration → same WebP chain; ffprobe for duration/size/creation_time (fallback: parse ffmpeg stderr). `indexVideos` in `~/.thefinder/config.json`.
 
 ## IPC contract
 

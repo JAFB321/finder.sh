@@ -8,7 +8,8 @@ import type {
 } from '@shared/types'
 import { AssetFlag } from '@shared/types'
 import { getDb, now, tx } from './index'
-import { hexToRgb, rgbToLab, duplicateClusters, dominantColors } from '../indexer/visual'
+import type { DuplicateCluster } from '@shared/ipc'
+import { hexToRgb, rgbToLab, dominantColors } from '../indexer/visual'
 
 export interface ScannedFile {
   path: string
@@ -21,7 +22,19 @@ export interface ScannedFile {
   mtime: number
 }
 
-const TILE_COLS = `a.id, a.width AS w, a.height AS h, a.label, a.thumb_state AS thumb, a.flags, a.taken_at AS takenAt`
+const TILE_COLS = `a.id, a.width AS w, a.height AS h, a.label, a.thumb_state AS thumb, a.flags, a.taken_at AS takenAt, CASE WHEN a.flags & 8 THEN (SELECT m.duration FROM asset_meta m WHERE m.asset_id = a.id) END AS dur`
+
+let durationColumn = false
+/** Libraries created before videos were indexed lack asset_meta.duration. */
+function ensureDurationColumn(d: ReturnType<typeof getDb>): void {
+  if (durationColumn) return
+  try {
+    d.exec(`ALTER TABLE asset_meta ADD COLUMN duration REAL`)
+  } catch {
+    /* already there */
+  }
+  durationColumn = true
+}
 
 // ---------- scan / upsert ----------
 
@@ -30,6 +43,7 @@ const TILE_COLS = `a.id, a.width AS w, a.height AS h, a.label, a.thumb_state AS 
  * Returns ids of assets that are new or whose primary file changed (need re-indexing).
  */
 export function upsertScannedFiles(rootId: number, files: ScannedFile[], scanId: number): number[] {
+  ensureFullHash()
   return tx((d) => {
     const selFile = d.prepare('SELECT id, size, mtime, asset_id FROM files WHERE path = ?')
     const insFile = d.prepare(
@@ -39,6 +53,7 @@ export function upsertScannedFiles(rootId: number, files: ScannedFile[], scanId:
     const updFile = d.prepare(
       `UPDATE files SET size = ?, mtime = ?, status = 'ok', seen_scan = ? WHERE id = ?`
     )
+    const clearHash = d.prepare(`UPDATE files SET full_hash = NULL, quick_hash = NULL WHERE id = ?`)
     const touched = new Set<string>() // dir\0base keys needing asset (re)pairing
     const changed = new Set<number>()
 
@@ -62,6 +77,7 @@ export function upsertScannedFiles(rootId: number, files: ScannedFile[], scanId:
       } else {
         updFile.run(f.size, f.mtime, scanId, row.id)
         if (row.size !== f.size || row.mtime !== f.mtime) {
+          clearHash.run(row.id)
           touched.add(`${f.dir}\0${f.base}`)
           if (row.asset_id) changed.add(row.asset_id)
         }
@@ -185,13 +201,26 @@ export function primaryPath(
   return r ? { path: r.path, ext: r.ext, isRaw: r.is_raw === 1, hash: r.content_hash } : null
 }
 
+/** Primary file paths (RAW for RAW+JPG pairs) of assets that are online. */
+export function primaryPaths(ids: number[]): string[] {
+  if (!ids.length) return []
+  return getDb()
+    .prepare(
+      `SELECT f.path FROM assets a JOIN files f ON f.id = a.primary_file_id
+       WHERE a.id IN (SELECT value FROM json_each(?)) AND f.status = 'ok'`
+    )
+    .pluck()
+    .all(JSON.stringify(ids)) as string[]
+}
+
 export function writeMeta(assetId: number, m: AssetMeta, hash: string): void {
+  ensureDurationColumn(getDb())
   tx((d) => {
     d.prepare(
       `UPDATE assets SET width = ?, height = ?, taken_at = ?, content_hash = ? WHERE id = ?`
     ).run(m.width, m.height, m.takenAt, hash, assetId)
     d.prepare(
-      `INSERT OR REPLACE INTO asset_meta(asset_id, orientation, camera, lens, focal, iso, aperture, shutter, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO asset_meta(asset_id, orientation, camera, lens, focal, iso, aperture, shutter, lat, lon, duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       assetId,
       m.orientation,
@@ -202,9 +231,15 @@ export function writeMeta(assetId: number, m: AssetMeta, hash: string): void {
       m.aperture,
       m.shutter,
       m.lat,
-      m.lon
+      m.lon,
+      m.duration ?? null
     )
   })
+}
+
+/** All video assets (flag 8), for re-queueing when video indexing is toggled on. */
+export function videoAssetIds(): number[] {
+  return getDb().prepare(`SELECT id FROM assets WHERE (flags & 8) != 0`).pluck().all() as number[]
 }
 
 export function writeThumbState(
@@ -422,28 +457,128 @@ export function resolveIds(filter: LibraryFilter, textEmbedding?: Float32Array |
 function dupFilter(ids: number[]): number[] {
   const clusters = duplicatesFor(ids)
   const order = new Map<number, number>()
-  clusters.forEach((c, ci) => c.forEach((id) => order.set(id, ci)))
+  clusters.forEach((c, ci) => c.ids.forEach((id) => order.set(id, ci)))
   return ids.filter((id) => order.has(id)).sort((x, y) => order.get(x)! - order.get(y)! || x - y)
 }
 
-export function duplicatesFor(ids: number[]): number[][] {
-  if (!ids.length) return []
+let fullHashReady = false
+/** `files.full_hash`/`quick_hash` arrived after v1; add them lazily so existing libraries keep working. */
+function ensureFullHash(): void {
+  if (fullHashReady) return
   const d = getDb()
-  const items: { id: number; phash: bigint }[] = []
-  const stmt = d
-    .prepare(
-      `SELECT asset_id AS id, phash FROM asset_visual WHERE phash IS NOT NULL AND asset_id IN (SELECT value FROM json_each(?))`
-    )
-    .safeIntegers()
-  // chunk to keep json small
-  for (let i = 0; i < ids.length; i += 5000) {
-    const rows = stmt.all(JSON.stringify(ids.slice(i, i + 5000))) as {
-      id: number
-      phash: number | bigint
-    }[]
-    for (const r of rows) items.push({ id: Number(r.id), phash: BigInt(r.phash) })
+  for (const col of ['full_hash', 'quick_hash']) {
+    try {
+      d.exec(`ALTER TABLE files ADD COLUMN ${col} TEXT`)
+    } catch {
+      // column already exists
+    }
   }
-  return duplicateClusters(items, 6)
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_files_size_hash ON files(size, full_hash)`)
+  fullHashReady = true
+}
+
+// Primary files of the selected assets. `sel` is a json array of asset ids.
+const SEL_PRIMARY = `WITH sel(id) AS (SELECT value FROM json_each(?))
+  SELECT a.id AS id, f.id AS fid, f.base, f.size, f.quick_hash, f.full_hash, f.status, f.path
+  FROM sel JOIN assets a ON a.id = sel.id JOIN files f ON f.id = a.primary_file_id`
+
+/**
+ * Duplicate clusters among `ids`, using only what is already known (no file I/O):
+ * same base name in different folders, then byte-identical files that have a cached `full_hash`.
+ * Overlapping groups are merged; name clusters come first.
+ */
+export function duplicatesFor(ids: number[]): DuplicateCluster[] {
+  if (!ids.length) return []
+  ensureFullHash()
+  const d = getDb()
+  const json = JSON.stringify(ids)
+  const parse = (rows: string[]): number[][] => rows.map((r) => JSON.parse(r) as number[])
+  const nameGroups = parse(
+    d
+      .prepare(
+        `SELECT json_group_array(id) FROM (${SEL_PRIMARY}) GROUP BY base HAVING COUNT(*) > 1 ORDER BY base`
+      )
+      .pluck()
+      .all(json) as string[]
+  )
+  const byteGroups = parse(
+    d
+      .prepare(
+        `SELECT json_group_array(id) FROM (${SEL_PRIMARY}) WHERE full_hash IS NOT NULL
+         GROUP BY size, full_hash HAVING COUNT(*) > 1 ORDER BY MIN(base)`
+      )
+      .pluck()
+      .all(json) as string[]
+  )
+  return mergeDuplicateGroups(nameGroups, byteGroups)
+}
+
+/** Union overlapping groups. A merged cluster is 'name' if any name group contributed to it. */
+export function mergeDuplicateGroups(
+  nameGroups: number[][],
+  byteGroups: number[][]
+): DuplicateCluster[] {
+  const parent = new Map<number, number>()
+  const find = (x: number): number => {
+    let r = x
+    while (parent.get(r) !== r) r = parent.get(r)!
+    parent.set(x, r)
+    return r
+  }
+  const all = [...nameGroups, ...byteGroups]
+  for (const g of all) for (const id of g) if (!parent.has(id)) parent.set(id, id)
+  for (const g of all) for (const id of g.slice(1)) parent.set(find(id), find(g[0]))
+  const byRoot = new Map<number, DuplicateCluster>()
+  const out: DuplicateCluster[] = []
+  // iteration order (name groups first) fixes cluster order
+  all.forEach((g, gi) => {
+    const root = find(g[0])
+    let c = byRoot.get(root)
+    if (!c) {
+      c = { ids: [], reason: gi < nameGroups.length ? 'name' : 'bytes' }
+      byRoot.set(root, c)
+      out.push(c)
+    }
+    for (const id of g) if (!c.ids.includes(id)) c.ids.push(id)
+  })
+  for (const c of out) c.ids.sort((a, b) => a - b)
+  return out
+}
+
+/**
+ * Files that still need hashing before byte duplicates among `ids` are known.
+ * Stage 'quick': same size as another file, no quick (head+tail) hash yet.
+ * Stage 'full': same size AND quick hash as another file, no full hash yet.
+ * The quick stage keeps a big library of same-sized RAWs from being read end to end.
+ */
+export function hashCandidates(
+  ids: number[],
+  stage: 'quick' | 'full'
+): { fileId: number; path: string }[] {
+  if (!ids.length) return []
+  ensureFullHash()
+  const sql =
+    stage === 'quick'
+      ? `WITH p AS (${SEL_PRIMARY}),
+           dup AS (SELECT size FROM p GROUP BY size HAVING COUNT(*) > 1)
+         SELECT DISTINCT fid AS fileId, path FROM p
+         WHERE quick_hash IS NULL AND full_hash IS NULL AND status = 'ok'
+           AND size IN (SELECT size FROM dup)
+         ORDER BY size, fid`
+      : `WITH p AS (${SEL_PRIMARY}),
+           dup AS (SELECT size, quick_hash FROM p WHERE quick_hash IS NOT NULL
+                   GROUP BY size, quick_hash HAVING COUNT(*) > 1)
+         SELECT DISTINCT fid AS fileId, path FROM p
+         WHERE full_hash IS NULL AND status = 'ok'
+           AND (size, quick_hash) IN (SELECT size, quick_hash FROM dup)
+         ORDER BY size, fid`
+  return getDb().prepare(sql).all(JSON.stringify(ids)) as { fileId: number; path: string }[]
+}
+
+export function setFileHash(fileId: number, stage: 'quick' | 'full', hash: string): void {
+  getDb()
+    .prepare(`UPDATE files SET ${stage === 'quick' ? 'quick_hash' : 'full_hash'} = ? WHERE id = ?`)
+    .run(hash, fileId)
 }
 
 function phashNeighbours(ph: bigint, maxDist: number): number[] {
@@ -492,6 +627,7 @@ function ftsQuery(q: string): string {
 export function tilesByIds(ids: number[]): AssetTile[] {
   if (!ids.length) return []
   const d = getDb()
+  ensureDurationColumn(d)
   const rows = d
     .prepare(`SELECT ${TILE_COLS} FROM assets a WHERE a.id IN (SELECT value FROM json_each(?))`)
     .all(JSON.stringify(ids)) as AssetTile[]
@@ -501,6 +637,7 @@ export function tilesByIds(ids: number[]): AssetTile[] {
 
 export function detail(id: number): AssetDetail | null {
   const d = getDb()
+  ensureDurationColumn(d)
   const a = d
     .prepare(`SELECT ${TILE_COLS}, a.name, a.dir, a.root_id AS rootId FROM assets a WHERE a.id = ?`)
     .get(id) as (AssetTile & { name: string; dir: string; rootId: number }) | undefined
@@ -536,7 +673,8 @@ export function detail(id: number): AssetDetail | null {
           aperture: m.aperture as number | null,
           shutter: m.shutter as number | null,
           lat: m.lat as number | null,
-          lon: m.lon as number | null
+          lon: m.lon as number | null,
+          duration: (m.duration ?? null) as number | null
         }
       : null,
     keywords: kws,

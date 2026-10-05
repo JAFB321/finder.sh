@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, ExternalLink, FolderOpen, Sparkles, X } from 'lucide-react'
+import { Aperture, Copy, ExternalLink, FolderOpen, Sparkles, X } from 'lucide-react'
 import { LABEL_COLORS, type AssetDetail, type Keyword } from '@shared/types'
 import { invoke, thumbUrl, usePush } from '@renderer/lib/api'
 import { cn, formatBytes, formatDate, formatShutter } from '@renderer/lib/utils'
+import { Tip } from '@renderer/components/ui/Tooltip'
 import { primarySelected, useLibrary } from '../library/store'
+import { useIntegrations } from '../sources/useIntegrations'
 
 export function Inspector(): React.JSX.Element {
   const selected = useLibrary((s) => s.selected)
@@ -12,6 +14,7 @@ export function Inspector(): React.JSX.Element {
   const setFilter = useLibrary((s) => s.setFilter)
   const id = primarySelected({ ids, cursor, selected })
   const [d, setD] = useState<AssetDetail | null>(null)
+  const lightroom = useIntegrations()?.lightroom
 
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -77,8 +80,19 @@ export function Inspector(): React.JSX.Element {
           >
             <ExternalLink size={13} />
           </Action>
+          {lightroom && (
+            <Action
+              title={many ? `Open ${selected.size} in Lightroom` : 'Open in Lightroom'}
+              onClick={() =>
+                void invoke('library:openInLightroom', { ids: many ? [...selected] : [id] })
+              }
+            >
+              <Aperture size={13} />
+            </Action>
+          )}
           <Action
-            title="Find similar (S)"
+            title="Find similar"
+            shortcut="S"
             onClick={() =>
               setFilter({
                 similarTo: id,
@@ -91,7 +105,11 @@ export function Inspector(): React.JSX.Element {
           >
             <Sparkles size={13} />
           </Action>
-          <Action title="Duplicates (D)" onClick={() => setFilter({ duplicatesOnly: true })}>
+          <Action
+            title="Show duplicates"
+            shortcut="D"
+            onClick={() => setFilter({ duplicatesOnly: true })}
+          >
             <Copy size={13} />
           </Action>
         </div>
@@ -319,23 +337,30 @@ function KV({ k, v }: { k: string; v: string }): React.JSX.Element {
 
 function Action({
   title,
+  shortcut,
   onClick,
   children,
   disabled
 }: {
   title: string
+  shortcut?: string
   onClick: () => void
   children: React.ReactNode
   disabled?: boolean
 }): React.JSX.Element {
+  // span is the tooltip trigger: disabled buttons swallow pointer events
   return (
-    <button
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      className="flex h-7 flex-1 items-center justify-center rounded-[6px] bg-white/[0.05] text-fg-2 transition-colors hover:bg-white/[0.09] hover:text-fg disabled:opacity-40 disabled:hover:bg-white/[0.05]"
-    >
-      {children}
-    </button>
+    <Tip label={title} shortcut={shortcut}>
+      <span className="flex flex-1">
+        <button
+          aria-label={title}
+          onClick={onClick}
+          disabled={disabled}
+          className="flex h-7 w-full items-center justify-center rounded-[6px] bg-white/[0.05] text-fg-2 transition-colors hover:bg-white/[0.09] hover:text-fg disabled:opacity-40 disabled:hover:bg-white/[0.05]"
+        >
+          {children}
+        </button>
+      </span>
+    </Tip>
   )
 }

@@ -3,7 +3,7 @@ import { parentPort } from 'worker_threads'
 import { createHash } from 'crypto'
 import { open, mkdir, stat, writeFile, readFile } from 'fs/promises'
 import { dirname } from 'path'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -17,7 +17,7 @@ sharp.cache(false)
 sharp.concurrency(1) // one thread per worker; the pool provides parallelism
 
 type Req =
-  | { id: number; kind: 'meta'; path: string; ext: string; isRaw: boolean }
+  | { id: number; kind: 'meta'; path: string; ext: string; isRaw: boolean; isVideo?: boolean }
   | {
       id: number
       kind: 'thumb'
@@ -27,6 +27,9 @@ type Req =
       hash: string
       sizes: number[]
       orientation: number
+      isVideo?: boolean
+      /** seconds, from the meta job; null = probe again */
+      duration?: number | null
     }
   | { id: number; kind: 'visual'; thumb: string }
 
@@ -56,6 +59,7 @@ function num(v: unknown): number | null {
 async function meta(
   req: Extract<Req, { kind: 'meta' }>
 ): Promise<{ meta: AssetMeta; hash: string }> {
+  if (req.isVideo) return videoMeta(req.path)
   const [hash, ex] = await Promise.all([
     cheapHash(req.path),
     exifr
@@ -134,7 +138,8 @@ async function meta(
       aperture: num(e.FNumber),
       shutter: num(e.ExposureTime),
       lat: num(e.latitude),
-      lon: num(e.longitude)
+      lon: num(e.longitude),
+      duration: null
     }
   }
 }
@@ -203,7 +208,9 @@ async function sipsFallback(path: string): Promise<Buffer> {
 async function thumb(
   req: Extract<Req, { kind: 'thumb' }>
 ): Promise<{ width: number; height: number }> {
-  const src = await decodableSource(req.path, req.ext, req.isRaw)
+  const src = req.isVideo
+    ? await videoFrame(req.path, req.duration ?? null)
+    : await decodableSource(req.path, req.ext, req.isRaw)
   const base = sharp(src, { failOn: 'none', limitInputPixels: false })
   const m = await base.metadata()
   // Embedded RAW previews carry no orientation tag; apply the RAW's own orientation explicitly.
@@ -256,8 +263,163 @@ async function visual(
   return { phash: phash32(gray).toString(), dominant: dominantColors(rgb, 8) }
 }
 
+// ---------- video (ffmpeg) ----------
+
+const FF_TIMEOUT = 15_000
+
+function runFf(
+  bin: string,
+  args: string[]
+): Promise<{ stdout: Buffer; stderr: string; code: number }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const out: Buffer[] = []
+    let err = ''
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error(`${bin.split(/[\\/]/).pop()} timed out`))
+    }, FF_TIMEOUT)
+    child.stdout.on('data', (b: Buffer) => out.push(b))
+    child.stderr.on('data', (b: Buffer) => {
+      if (err.length < 64 * 1024) err += b.toString()
+    })
+    child.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolve({ stdout: Buffer.concat(out), stderr: err, code: code ?? -1 })
+    })
+  })
+}
+
+interface Probe {
+  width: number
+  height: number
+  duration: number | null
+  takenAt: number | null
+}
+
+/** Display dimensions, i.e. swapped for portrait clips stored rotated (phones). */
+async function probe(path: string): Promise<Probe> {
+  if (!ff) throw new Error('ffmpeg not found')
+  if (ff.ffprobe) {
+    const r = await runFf(ff.ffprobe, [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'format=duration:format_tags=creation_time:stream=width,height:stream_tags=rotate:stream_side_data=rotation',
+      '-of',
+      'json',
+      path
+    ])
+    if (r.code !== 0) throw new Error(r.stderr.trim().split('\n').pop() || 'ffprobe failed')
+    const j = JSON.parse(r.stdout.toString()) as {
+      streams?: {
+        width?: number
+        height?: number
+        tags?: { rotate?: string }
+        side_data_list?: { rotation?: number }[]
+      }[]
+      format?: { duration?: string; tags?: { creation_time?: string } }
+    }
+    const s = j.streams?.[0]
+    const rot = num(s?.tags?.rotate) ?? s?.side_data_list?.find((d) => d.rotation != null)?.rotation
+    const quarter = Math.abs(Math.round(Number(rot ?? 0) / 90)) % 2 === 1
+    const w = s?.width ?? 0
+    const h = s?.height ?? 0
+    const created = j.format?.tags?.creation_time
+    const t = created ? Date.parse(created) : NaN
+    return {
+      width: quarter ? h : w,
+      height: quarter ? w : h,
+      duration: num(j.format?.duration),
+      takenAt: Number.isFinite(t) && t > 0 ? t : null
+    }
+  }
+  // No ffprobe: `ffmpeg -i` prints container info on stderr and exits 1.
+  const { stderr } = await runFf(ff.ffmpeg, ['-hide_banner', '-i', path])
+  const d = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(stderr)
+  const dim = /Video:.*?(\d{2,5})x(\d{2,5})/.exec(stderr)
+  const rot = /rotat\w*\s*(?:of|:)?\s*(-?\d+(?:\.\d+)?)/i.exec(stderr)
+  const ct = /creation_time\s*:\s*(\S+)/.exec(stderr)
+  const quarter = rot ? Math.abs(Math.round(Number(rot[1]) / 90)) % 2 === 1 : false
+  const w = dim ? Number(dim[1]) : 0
+  const h = dim ? Number(dim[2]) : 0
+  const t = ct ? Date.parse(ct[1]) : NaN
+  return {
+    width: quarter ? h : w,
+    height: quarter ? w : h,
+    duration: d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : null,
+    takenAt: Number.isFinite(t) && t > 0 ? t : null
+  }
+}
+
+async function videoMeta(path: string): Promise<{ meta: AssetMeta; hash: string }> {
+  const [hash, p] = await Promise.all([cheapHash(path), probe(path).catch(() => null)])
+  return {
+    hash,
+    meta: {
+      width: p?.width ?? 0,
+      height: p?.height ?? 0,
+      orientation: 1,
+      takenAt: p?.takenAt ?? null,
+      camera: null,
+      lens: null,
+      focal: null,
+      iso: null,
+      aperture: null,
+      shutter: null,
+      lat: null,
+      lon: null,
+      duration: p?.duration ?? null
+    }
+  }
+}
+
+/** One JPEG frame at ~10% in (ffmpeg auto-rotates), capped at 2560 px wide. */
+async function videoFrame(path: string, duration: number | null): Promise<Buffer> {
+  if (!ff) throw new Error('ffmpeg not found')
+  const dur = duration ?? (await probe(path).catch(() => null))?.duration ?? null
+  const grab = async (at: number): Promise<Buffer> => {
+    const r = await runFf(ff!.ffmpeg, [
+      '-v',
+      'error',
+      '-ss',
+      at.toFixed(3),
+      '-i',
+      path,
+      '-frames:v',
+      '1',
+      '-vf',
+      "scale='min(2560,iw)':-2",
+      '-f',
+      'image2',
+      '-c:v',
+      'mjpeg',
+      '-q:v',
+      '3',
+      'pipe:1'
+    ])
+    if (!r.stdout.length) throw new Error(r.stderr.trim().split('\n').pop() || 'ffmpeg: no frame')
+    return r.stdout
+  }
+  const at = dur ? dur * 0.1 : 1
+  try {
+    return await grab(at)
+  } catch (e) {
+    if (at === 0) throw e
+    return grab(0) // clip shorter than the seek point
+  }
+}
+
 import { workerData } from 'worker_threads'
-thumbsDir = (workerData as { thumbsDir: string }).thumbsDir
+const wd = workerData as { thumbsDir: string; ffmpeg?: string | null; ffprobe?: string | null }
+thumbsDir = wd.thumbsDir
+const ff = wd.ffmpeg ? { ffmpeg: wd.ffmpeg, ffprobe: wd.ffprobe ?? null } : null
 
 parentPort!.on('message', async (req: Req) => {
   try {

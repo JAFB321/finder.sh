@@ -4,6 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type { Collection } from '@shared/types'
 import { invoke } from '@renderer/lib/api'
 import { useLibrary } from '../library/store'
+import { useIntegrations } from '../sources/useIntegrations'
 
 /** ⌘K: collections, layouts, quick actions. */
 export function CommandPalette(): React.JSX.Element {
@@ -13,6 +14,7 @@ export function CommandPalette(): React.JSX.Element {
   const setLayout = useLibrary((s) => s.setLayout)
   const setFilter = useLibrary((s) => s.setFilter)
   const filter = useLibrary((s) => s.filter)
+  const lightroom = useIntegrations()?.lightroom
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -90,6 +92,13 @@ export function CommandPalette(): React.JSX.Element {
                   <Item onSelect={() => run(() => invoke('library:reveal', { id: sel[0] }))}>
                     Reveal in Finder
                   </Item>
+                  {lightroom && (
+                    <Item
+                      onSelect={() => run(() => invoke('library:openInLightroom', { ids: sel }))}
+                    >
+                      Open in Lightroom{sel.length > 1 ? ` (${sel.length})` : ''}
+                    </Item>
+                  )}
                 </Command.Group>
               )}
               <Command.Group heading="Collections">
@@ -150,6 +159,19 @@ export function CommandPalette(): React.JSX.Element {
                   }
                 >
                   {filter.includeOffline ? 'Hide' : 'Show'} offline / missing
+                </Item>
+                <Item
+                  onSelect={() =>
+                    run(async () => {
+                      const cur = await invoke('settings:get', undefined)
+                      const next = await invoke('settings:set', {
+                        patch: { indexVideos: !cur.indexVideos }
+                      })
+                      alert(`Video indexing is now ${next.indexVideos ? 'on' : 'off'}`)
+                    })
+                  }
+                >
+                  Index videos: on/off
                 </Item>
               </Command.Group>
               <Command.Group heading="Library">
