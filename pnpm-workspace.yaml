@@ -8,3 +8,6 @@ allowBuilds:
   protobufjs: false
   sharp: true
   '@huggingface/transformers': true
+
+packages:
+  - '.'

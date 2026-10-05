@@ -8,6 +8,7 @@ import { Inspector } from './features/inspector/Inspector'
 import { Loupe } from './features/loupe/Loupe'
 import { CommandPalette } from './features/palette/CommandPalette'
 import { useLibrary } from './features/library/store'
+import { TooltipProvider } from './components/ui/Tooltip'
 
 // automation hook (see THEFINDER_STEPS in main); harmless in production
 ;(window as unknown as { __tf: typeof useLibrary }).__tf = useLibrary
@@ -62,19 +63,21 @@ export default function App(): React.JSX.Element {
   }, [])
 
   return (
-    <div className="flex h-full w-full">
-      <Sidebar />
-      <main className="relative flex min-w-0 flex-1 flex-col">
-        <Toolbar />
-        <div className="relative min-h-0 flex-1">
-          {layout === 'filmstrip' ? <Loupe embedded /> : <Grid />}
-          <AnimatePresence>
-            {loupe && layout !== 'filmstrip' && <Loupe key="loupe" />}
-          </AnimatePresence>
-        </div>
-      </main>
-      {inspector && <Inspector />}
-      <CommandPalette />
-    </div>
+    <TooltipProvider>
+      <div className="flex h-full w-full">
+        <Sidebar />
+        <main className="relative flex min-w-0 flex-1 flex-col">
+          <Toolbar />
+          <div className="relative min-h-0 flex-1">
+            {layout === 'filmstrip' ? <Loupe embedded /> : <Grid />}
+            <AnimatePresence>
+              {loupe && layout !== 'filmstrip' && <Loupe key="loupe" />}
+            </AnimatePresence>
+          </div>
+        </main>
+        {inspector && <Inspector />}
+        <CommandPalette />
+      </div>
+    </TooltipProvider>
   )
 }
