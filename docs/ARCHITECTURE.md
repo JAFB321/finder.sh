@@ -28,6 +28,7 @@
 ```
 library.db          SQLite, WAL mode
 cache/thumbs/<ab>/<hash>_<size>.webp    256 | 1024 | 2560 (long edge)
+cache/full/<ab>/<hash>.jpg              full-resolution RAW/HEIC decode (loupe deep zoom)
 models/             ONNX CLIP weights (downloaded on first use)
 config.json         roots, ui prefs
 logs/
@@ -59,6 +60,8 @@ logs/
 - RAW: `extract-raw-preview` → embedded JPEG (Sony: 1616×1080) → sharp → WebP sizes. No RAW decode in MVP. If preview missing → sharp attempts decode; if fail → `sips` fallback on macOS.
 - Served via `thumb://<asset_id>?s=256` custom protocol from cache path. Renderer uses plain `<img>` with `loading="lazy"` + `decoding="async"`.
 - 2560 size only generated on demand (loupe), then cached.
+- Full resolution (RAW/HEIC only): `asset://a/<id>?full=1` → `queue.ensureFull` → worker `full` job runs `sips` (ImageIO RAW decode, ~1.8 s for a 24 MP ARW on M4, 30 s limit) → sharp orients + re-encodes JPEG q90 4:4:4 to `cache/full/<ab>/<hash>.jpg`. Decoded on demand only (loupe zoom past the hi-res tier's pixels; never for neighbours), concurrent requests deduped. No eviction yet — the cache grows ~10–15 MB per zoomed RAW. Browser-native formats serve the original.
+- Loupe tiers: 1024 thumb → `asset://` (original or 2560) → `?full=1` when zoomed past the loaded image's pixels and the asset is bigger (`needsFullTier` in `features/loupe/zoom.ts`).
 
 ## Search
 

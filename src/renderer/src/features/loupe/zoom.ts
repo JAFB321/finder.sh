@@ -59,3 +59,20 @@ export function zoomAt(v: View, s: number, px: number, py: number): View {
   const k = s / v.s
   return { s, tx: px - (px - v.tx) * k, ty: py - (py - v.ty) * k }
 }
+
+/**
+ * Whether the loupe should fetch the full-resolution tier: the user zoomed in (s > 1) far
+ * enough that the image is drawn larger than the loaded representation's pixels, and the
+ * asset itself has more pixels than that representation (RAW/HEIC served from a preview).
+ */
+export function needsFullTier(
+  s: number,
+  fitWidth: number,
+  loadedWidth: number,
+  assetWidth: number,
+  dpr = 1
+): boolean {
+  if (s <= 1.001 || loadedWidth <= 0) return false
+  // compare device pixels on screen against the pixels we actually have
+  return s * fitWidth * dpr > loadedWidth + 1 && loadedWidth < assetWidth - 1
+}

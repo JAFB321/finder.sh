@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { assetUrl, thumbUrl } from '@renderer/lib/api'
 import { loadImage, readyImage } from './preload'
-import { fitRect } from './zoom'
+import { fitRect, needsFullTier } from './zoom'
 import { ZoomController } from './zoomController'
 
 const PAD = 16
@@ -11,6 +11,8 @@ interface Layer {
   id: number
   thumb: string | null
   hi: string | null
+  /** full-resolution decode (RAW/HEIC deep zoom), on top of `hi` */
+  full: string | null
   ar: number
 }
 
@@ -41,15 +43,25 @@ export function Stage({
   const [size, setSize] = useState({ cw: 0, ch: 0 })
   const [layers, setLayers] = useState<Layer[]>([])
   const [hiFailed, setHiFailed] = useState<number | null>(null)
+  const [fullLoading, setFullLoading] = useState<number | null>(null)
+  // Per-asset tier state, read from zoom callbacks (no re-render per wheel tick).
+  const tier = useRef({ id, hiW: 0, requested: false })
+  const checkFull = useRef<() => void>(() => {})
 
   // ---- loading ---------------------------------------------------------------------------
   useEffect(() => {
     if (!ready) return
     let alive = true
+    tier.current = { id, hiW: 0, requested: false }
     const tUrl = thumbUrl(id, 1024)
     const hUrl = assetUrl(id)
     const put = (img: HTMLImageElement, hi: boolean): void => {
       if (!alive) return
+      if (hi) {
+        tier.current.hiW = img.naturalWidth
+        // Already zoomed in when the hi-res arrived (e.g. zoomed on the 1024 thumb).
+        window.setTimeout(() => checkFull.current(), 0)
+      }
       const ar = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1.5
       setLayers((prev) => {
         const top = prev[prev.length - 1]
@@ -62,6 +74,7 @@ export function Stage({
           id,
           thumb: hi ? null : tUrl,
           hi: hi ? hUrl : null,
+          full: null,
           ar
         }
         return [...(top ? [top] : []), next]
@@ -92,6 +105,36 @@ export function Stage({
       window.clearTimeout(t)
     }
   }, [id, ready])
+
+  // Third tier: fetch `?full=1` once the user zooms past the hi-res image's pixels.
+  useEffect(() => {
+    const check = (): void => {
+      const t = tier.current
+      if (t.requested || t.id !== id) return
+      if (!needsFullTier(zc.scale, zc.fitWidth, t.hiW, natW, window.devicePixelRatio || 1)) return
+      t.requested = true
+      const fUrl = `${assetUrl(id)}?full=1`
+      setFullLoading(id)
+      // Not through the preload LRU: a decoded 24 MP bitmap is too big to keep around.
+      const img = new Image()
+      img.decoding = 'async'
+      img.src = fUrl
+      const done = (): void => setFullLoading((cur) => (cur === t.id ? null : cur))
+      img.decode().then(() => {
+        if (tier.current !== t) return done()
+        setLayers((prev) => {
+          const top = prev[prev.length - 1]
+          if (!top || top.id !== t.id) return prev
+          return [...prev.slice(0, -1), { ...top, full: fUrl }]
+        })
+        done()
+      }, done)
+    }
+    checkFull.current = check
+    zc.listen(check)
+    check()
+    return () => zc.listen(null)
+  }, [zc, id, natW])
 
   // Drop the layer underneath once the new one has faded in.
   const top = layers[layers.length - 1]
@@ -161,7 +204,8 @@ export function Stage({
     zc.actual(e.clientX - r.left, e.clientY - r.top)
   }
 
-  const spinner = ready && current && !current.hi && hiFailed !== id
+  const spinner =
+    (ready && current && !current.hi && hiFailed !== id) || (fullLoading === id && !current?.full)
 
   return (
     <div
@@ -200,6 +244,14 @@ export function Stage({
                     alt=""
                     draggable={false}
                     className="absolute inset-0 h-full w-full object-contain"
+                  />
+                )}
+                {l.full && (
+                  <img
+                    src={l.full}
+                    alt=""
+                    draggable={false}
+                    className="absolute inset-0 h-full w-full animate-[fade-in_120ms_ease-out_both] object-contain"
                   />
                 )}
               </div>

@@ -35,7 +35,10 @@ export function registerSchemes(): void {
 
 const notFound = (): Response => new Response('not found', { status: 404 })
 
-/** thumb://a/<id>?s=256|1024|2560   asset://a/<id>  (best renderable representation of the primary file) */
+/**
+ * thumb://a/<id>?s=256|1024|2560   asset://a/<id>  (best renderable representation of the primary file)
+ * asset://a/<id>?full=1  full-resolution decode for RAW/HEIC (original for browser-native formats)
+ */
 export function installProtocols(queue: IndexQueue): void {
   protocol.handle('thumb', async (req) => {
     const url = new URL(req.url)
@@ -64,6 +67,16 @@ export function installProtocols(queue: IndexQueue): void {
     if (!p) return notFound()
     if (BROWSER_EXTS.has(p.ext) && existsSync(p.path))
       return net.fetch(pathToFileURL(p.path).toString())
+    if (url.searchParams.get('full') === '1') {
+      // Full-resolution decode (RAW/HEIC), on demand + cached. Falls back to the 2560 tier.
+      const made = await queue.ensureFull(id)
+      if (made) {
+        const res = await net.fetch(pathToFileURL(made).toString())
+        return new Response(res.body, {
+          headers: { 'content-type': 'image/jpeg', 'cache-control': 'max-age=31536000, immutable' }
+        })
+      }
+    }
     const big = await queue.ensureThumb(id, 2560)
     if (!big) return notFound()
     const res = await net.fetch(pathToFileURL(big).toString())

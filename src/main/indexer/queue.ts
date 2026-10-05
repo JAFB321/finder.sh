@@ -5,11 +5,13 @@ import { VIDEO_EXTS } from '@shared/types'
 import { WorkerPool } from './pool'
 import * as jobs from '../db/jobs'
 import * as assets from '../db/assets'
-import { paths, thumbPath } from '../paths'
+import { fullPath, paths, thumbPath } from '../paths'
 import { isScanning } from './scanner'
 import { existsSync } from 'fs'
 import { resolveFfmpeg } from '../services/ffmpeg'
 import { getConfig } from '../config'
+
+const BROWSER_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'])
 
 export interface QueueEvents {
   onAssetsUpdated: (ids: number[]) => void
@@ -50,6 +52,7 @@ export class IndexQueue {
     const ff = resolveFfmpeg()
     this.pool = new WorkerPool(join(__dirname, 'workers/indexer.js'), n, 2, {
       thumbsDir: paths.thumbs,
+      fullDir: paths.full,
       ffmpeg: ff?.ffmpeg ?? null,
       ffprobe: ff?.ffprobe ?? null
     })
@@ -143,6 +146,49 @@ export class IndexQueue {
       })
       return existsSync(out) ? out : null
     } catch {
+      return null
+    }
+  }
+
+  private fullInFlight = new Map<number, Promise<string | null>>()
+
+  /**
+   * Full-resolution JPEG of a RAW/HEIC (loupe deep zoom), decoded on demand and cached in
+   * `cache/full`. Returns null for browser-native formats (serve the original), video and errors.
+   * Concurrent requests for the same asset share one decode.
+   */
+  ensureFull(assetId: number): Promise<string | null> {
+    const pending = this.fullInFlight.get(assetId)
+    if (pending) return pending
+    const job = this.makeFull(assetId).finally(() => this.fullInFlight.delete(assetId))
+    this.fullInFlight.set(assetId, job)
+    return job
+  }
+
+  private async makeFull(assetId: number): Promise<string | null> {
+    const p = assets.primaryPath(assetId)
+    if (!p?.hash || VIDEO_EXTS.has(p.ext) || BROWSER_EXTS.has(p.ext)) return null
+    const out = fullPath(p.hash)
+    if (existsSync(out)) return out
+    try {
+      const d = assets.dims(assetId)
+      const r = await this.pool.run<{ width: number; height: number; bytes: number; ms: number }>({
+        kind: 'full',
+        assetId,
+        path: p.path,
+        ext: p.ext,
+        isRaw: p.isRaw,
+        hash: p.hash,
+        orientation: d.orientation,
+        expectWidth: d.width,
+        expectHeight: d.height
+      })
+      console.log(
+        `[full] asset ${assetId} ${r.width}x${r.height} ${(r.bytes / 1e6).toFixed(1)} MB in ${r.ms} ms`
+      )
+      return existsSync(out) ? out : null
+    } catch (e) {
+      console.warn(`[full] asset ${assetId} failed: ${(e as Error).message}`)
       return null
     }
   }

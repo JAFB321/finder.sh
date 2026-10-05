@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { STRIP_GAP, centreScroll, itemWidth, prefixOffsets, visibleRange } from './strip'
-import { FIT, clampView, fitRect, zoomAt } from './zoom'
+import { FIT, clampView, fitRect, needsFullTier, zoomAt } from './zoom'
 
 describe('strip', () => {
   const widths = Array.from({ length: 10_000 }, (_, i) => itemWidth(i % 2 ? 1.5 : 0.67))
@@ -54,5 +54,27 @@ describe('zoom', () => {
     expect(v.s).toBe(4)
     expect(v.tx).toBe(-rect.x * 4) // left edge pinned
     expect(v.ty).toBe(600 - 600 * 4) // bottom edge pinned
+  })
+})
+
+describe('needsFullTier', () => {
+  // ARW: 1616 px preview in a 1200 px wide fit rect, 6000 px original
+  it('stays on the preview at fit and while it still has enough pixels', () => {
+    expect(needsFullTier(1, 1200, 1616, 6000)).toBe(false)
+    expect(needsFullTier(1.3, 1200, 1616, 6000)).toBe(false)
+  })
+  it('asks for the full tier once zoomed past the preview pixels', () => {
+    expect(needsFullTier(1.4, 1200, 1616, 6000)).toBe(true)
+  })
+  it('never for an already full-size image, or before the hi-res loaded', () => {
+    expect(needsFullTier(4, 1200, 6000, 6000)).toBe(false)
+    expect(needsFullTier(4, 1200, 1616, 1616)).toBe(false)
+    expect(needsFullTier(4, 1200, 0, 6000)).toBe(false)
+  })
+  it('does not fire at fit even on a stage wider than the preview', () => {
+    expect(needsFullTier(1, 2400, 1616, 6000)).toBe(false)
+    // Retina: 1.2 x 1200 css px = 2880 device px > 1616 loaded px
+    expect(needsFullTier(1.2, 1200, 1616, 6000, 2)).toBe(true)
+    expect(needsFullTier(1.2, 1200, 1616, 6000, 1)).toBe(false)
   })
 })

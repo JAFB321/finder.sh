@@ -201,6 +201,17 @@ export function primaryPath(
   return r ? { path: r.path, ext: r.ext, isRaw: r.is_raw === 1, hash: r.content_hash } : null
 }
 
+/** Oriented pixel size + EXIF orientation of an asset (for the full-resolution decode). */
+export function dims(assetId: number): { width: number; height: number; orientation: number } {
+  const r = getDb()
+    .prepare(
+      `SELECT a.width, a.height, m.orientation FROM assets a LEFT JOIN asset_meta m ON m.asset_id = a.id WHERE a.id = ?`
+    )
+    .get(assetId) as
+    { width: number | null; height: number | null; orientation: number | null } | undefined
+  return { width: r?.width ?? 0, height: r?.height ?? 0, orientation: r?.orientation ?? 1 }
+}
+
 /** Primary file paths (RAW for RAW+JPG pairs) of assets that are online. */
 export function primaryPaths(ids: number[]): string[] {
   if (!ids.length) return []

@@ -24,11 +24,17 @@ export class ZoomController {
   private stage: HTMLElement | null = null
   private viewport: HTMLElement | null = null
   private badge: HTMLElement | null = null
+  private onChange: (() => void) | null = null
 
   attach(stage: HTMLElement | null, viewport: HTMLElement | null, badge: HTMLElement | null): void {
     this.stage = stage
     this.viewport = viewport
     this.badge = badge
+  }
+
+  /** Called after every view change (keep it O(1)); null to stop. */
+  listen(fn: (() => void) | null): void {
+    this.onChange = fn
   }
 
   dispose(): void {
@@ -47,6 +53,15 @@ export class ZoomController {
     return this.geo.natW > 0 ? this.geo.natW / this.geo.rect.w : 1
   }
 
+  get scale(): number {
+    return this.view.s
+  }
+
+  /** Width of the fitted image rect at s = 1 (CSS px). */
+  get fitWidth(): number {
+    return this.geo.rect.w
+  }
+
   get zoomed(): boolean {
     return this.view.s > 1.001
   }
@@ -55,6 +70,7 @@ export class ZoomController {
     const g = this.geo
     this.view = clampView(v, g.rect, g.cw, g.ch, maxScale(this.oneToOne))
     if (animate) this.animate = true
+    this.onChange?.()
     if (!this.raf)
       this.raf = requestAnimationFrame(() => {
         this.raf = 0

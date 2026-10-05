@@ -1,7 +1,7 @@
 // worker_threads entry: meta / thumb / visual jobs. No DB access here.
 import { parentPort } from 'worker_threads'
 import { createHash } from 'crypto'
-import { open, mkdir, stat, writeFile, readFile } from 'fs/promises'
+import { open, mkdir, stat, writeFile, readFile, unlink } from 'fs/promises'
 import { dirname } from 'path'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
@@ -32,6 +32,18 @@ type Req =
       duration?: number | null
     }
   | { id: number; kind: 'visual'; thumb: string }
+  | {
+      id: number
+      kind: 'full'
+      path: string
+      ext: string
+      isRaw: boolean
+      hash: string
+      orientation: number
+      /** oriented pixel size from the DB (0 = unknown) */
+      expectWidth: number
+      expectHeight: number
+    }
 
 const BROWSER_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'])
 
@@ -247,6 +259,65 @@ async function thumb(
   return rotated || rawRot ? { width: h, height: w } : { width: w, height: h }
 }
 
+const SIPS_TIMEOUT = 30_000
+
+/**
+ * Full-resolution JPEG of a RAW/HEIC via ImageIO (`sips`, ~1.8 s for 24 MP ARW on M-series),
+ * oriented like the asset and written to the `cache/full` shard. Browser-native formats need
+ * nothing (the protocol serves the original); video is not supported.
+ */
+async function full(
+  req: Extract<Req, { kind: 'full' }>
+): Promise<{ width: number; height: number; bytes: number; ms: number }> {
+  if (BROWSER_EXTS.has(req.ext)) return { width: 0, height: 0, bytes: 0, ms: 0 }
+  if (!req.isRaw && req.ext !== 'heic' && req.ext !== 'heif')
+    throw new Error(`full decode not supported for .${req.ext}`)
+  if (process.platform !== 'darwin') throw new Error('full decode needs macOS ImageIO')
+  const t0 = Date.now()
+  const tmp = join(
+    tmpdir(),
+    `tf-full-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`
+  )
+  try {
+    await exec(
+      'sips',
+      ['-s', 'format', 'jpeg', '-s', 'formatOptions', '92', req.path, '--out', tmp],
+      {
+        timeout: SIPS_TIMEOUT,
+        killSignal: 'SIGKILL'
+      }
+    )
+    const m = await sharp(tmp, { limitInputPixels: false }).metadata()
+    const tagged = (m.orientation ?? 1) >= 5
+    const w = tagged ? (m.height ?? 0) : (m.width ?? 0)
+    const h = tagged ? (m.width ?? 0) : (m.height ?? 0)
+    let img = sharp(tmp, { limitInputPixels: false }).autoOrient()
+    let out = { width: w, height: h }
+    const ew = req.expectWidth
+    const eh = req.expectHeight
+    if (ew && eh && ew !== eh && w !== h && ew > eh !== w > h) {
+      // Decoder ignored the RAW orientation: apply it like thumb() does for embedded previews.
+      const angle = { 6: 90, 8: 270 }[req.orientation as 6 | 8] ?? 0
+      if (angle) {
+        img = img.rotate(angle)
+        out = { width: h, height: w }
+      }
+    }
+    const buf = await img.jpeg({ quality: 90, chromaSubsampling: '4:4:4' }).toBuffer()
+    const dest = fullFile(req.hash)
+    await mkdir(dirname(dest), { recursive: true })
+    await writeFile(dest, buf)
+    return { ...out, bytes: buf.length, ms: Date.now() - t0 }
+  } finally {
+    await unlink(tmp).catch(() => {})
+  }
+}
+
+let fullDir = ''
+function fullFile(hash: string): string {
+  return join(fullDir, hash.slice(0, 2), `${hash}.jpg`)
+}
+
 let thumbsDir = ''
 function thumbFile(hash: string, size: number): string {
   return join(thumbsDir, hash.slice(0, 2), `${hash}_${size}.webp`)
@@ -417,8 +488,14 @@ async function videoFrame(path: string, duration: number | null): Promise<Buffer
 }
 
 import { workerData } from 'worker_threads'
-const wd = workerData as { thumbsDir: string; ffmpeg?: string | null; ffprobe?: string | null }
+const wd = workerData as {
+  thumbsDir: string
+  fullDir?: string
+  ffmpeg?: string | null
+  ffprobe?: string | null
+}
 thumbsDir = wd.thumbsDir
+fullDir = wd.fullDir ?? join(dirname(wd.thumbsDir), 'full')
 const ff = wd.ffmpeg ? { ffmpeg: wd.ffmpeg, ffprobe: wd.ffprobe ?? null } : null
 
 parentPort!.on('message', async (req: Req) => {
@@ -427,6 +504,7 @@ parentPort!.on('message', async (req: Req) => {
     if (req.kind === 'meta') result = await meta(req)
     else if (req.kind === 'thumb') result = await thumb(req)
     else if (req.kind === 'visual') result = await visual(req)
+    else if (req.kind === 'full') result = await full(req)
     else throw new Error('unknown job')
     parentPort!.postMessage({ id: req.id, ok: true, result })
   } catch (e) {
