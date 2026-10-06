@@ -28,6 +28,7 @@ export function Grid(): React.JSX.Element {
   const setCursor = useLibrary((s) => s.setCursor)
   const setLoupe = useLibrary((s) => s.setLoupe)
   const clearSelection = useLibrary((s) => s.clearSelection)
+  const filter = useLibrary((s) => s.filter)
   const groupSetting = useLibrary((s) => s.timelineGroup)
   const setGroup = useLibrary((s) => s.setTimelineGroup)
 
@@ -119,6 +120,14 @@ export function Grid(): React.JSX.Element {
     })
   }, [])
   useEffect(() => () => cancelAnimationFrame(raf.current), [])
+
+  // a new filter is a new result set: start from the top
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    el.scrollTop = 0
+    setScroll((s) => (s.top === 0 ? s : { ...s, top: 0 }))
+  }, [filter])
 
   const seek = useCallback((top: number) => {
     scroller.current?.scrollTo({ top })
