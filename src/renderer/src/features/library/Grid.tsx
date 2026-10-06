@@ -152,6 +152,23 @@ export function Grid(): React.JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      // page / edge scrolling (on a Mac keyboard: fn+arrows)
+      const el = scroller.current
+      if (
+        el &&
+        (e.key === 'PageDown' || e.key === 'PageUp' || e.key === 'Home' || e.key === 'End')
+      ) {
+        e.preventDefault()
+        const page = el.clientHeight * 0.9
+        const top =
+          e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? el.scrollHeight
+              : el.scrollTop + (e.key === 'PageDown' ? page : -page)
+        el.scrollTo({ top, behavior: 'smooth' })
+        return
+      }
       const dirs: Record<string, 'up' | 'down' | 'left' | 'right'> = {
         ArrowUp: 'up',
         ArrowDown: 'down',
