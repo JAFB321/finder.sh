@@ -18,7 +18,8 @@ export function getDb(): DB {
   db.pragma('mmap_size = 268435456')
   db.pragma('cache_size = -65536')
   db.pragma('foreign_keys = ON')
-  sqliteVec.load(db)
+  // Packaged builds keep the dylib outside app.asar (dlopen can't read inside the archive).
+  db.loadExtension(sqliteVec.getLoadablePath().replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'))
   migrate(db)
   return db
 }

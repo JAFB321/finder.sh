@@ -1,44 +1,46 @@
-appId: com.electron.app
-productName: the-finder
+appId: dev.jafb321.thefinder
+productName: The Finder
+copyright: © jafb321
 directories:
   buildResources: build
+  output: dist
 files:
+  - '**/*'
   - '!**/.vscode/*'
   - '!src/*'
+  - '!docs/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!vitest.config.ts'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md,CLAUDE.md}'
+  - '!{.env,.env.*,.npmrc,.nvmrc,pnpm-lock.yaml,pnpm-workspace.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  # onnxruntime-node ships every platform; keep only macOS arm64
+  - '!node_modules/onnxruntime-node/bin/napi-v*/{linux,win32}/**'
+  - '!node_modules/onnxruntime-node/bin/napi-v*/darwin/x64/**'
+  # onnxruntime-web is only required as a loader stub by transformers.js in Node; its wasm never runs here
+  - '!node_modules/onnxruntime-web/dist/**'
+  - 'node_modules/onnxruntime-web/dist/ort.webgpu.min.js'
+  - 'node_modules/onnxruntime-web/dist/ort.webgpu.min.mjs'
+  - 'node_modules/onnxruntime-web/dist/ort.webgpu.bundle.min.mjs'
+# Native binaries and anything spawned as a child process must live outside app.asar.
 asarUnpack:
   - resources/**
+  - node_modules/sqlite-vec-darwin-arm64/**
+  - node_modules/@img/**
+  - node_modules/onnxruntime-node/bin/**
+  - node_modules/better-sqlite3/build/**
   - node_modules/ffmpeg-static/**
-win:
-  executableName: the-finder
-nsis:
-  artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
 mac:
+  category: public.app-category.photography
+  target:
+    - target: dmg
+      arch: [arm64]
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    NSPhotoLibraryUsageDescription: The Finder indexes the photo folders you choose.
+  # unsigned for now: first launch needs right-click → Open (or `xattr -d com.apple.quarantine`)
+  identity: null
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
-linux:
-  target:
-    - AppImage
-    - snap
-    - deb
-  maintainer: electronjs.org
-  category: Utility
-appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
 npmRebuild: false
-publish:
-  provider: generic
-  url: https://example.com/auto-updates

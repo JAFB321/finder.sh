@@ -13,7 +13,7 @@ Node 22 via nvm (`.nvmrc`). Run `source ~/.nvm/nvm.sh && nvm use` before any pnp
 pnpm dev          # electron-vite dev (HMR renderer, restarts main on change)
 pnpm check        # typecheck + lint + tests — run before every commit
 pnpm test         # vitest (pure logic: layouts, phash, color, db queries)
-pnpm build:mac    # dmg
+pnpm build:mac    # unsigned arm64 DMG in dist/ (~170 MB); smoke-test the packaged binary with THEFINDER_HOME + THEFINDER_STEPS before shipping
 ```
 
 ## Layout
