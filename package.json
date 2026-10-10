@@ -6,6 +6,9 @@
   "author": "jafb321",
   "license": "MIT",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
