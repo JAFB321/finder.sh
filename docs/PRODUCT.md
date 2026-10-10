@@ -1,4 +1,4 @@
-# The Finder — Product
+# finder.sh — Product
 
 Local-first photo library for a photographer-programmer with ~17k RAW/JPG files spread across `~/Pictures` and external SSDs. Index in place (never move or modify originals), browse fast, tag, and find images through filters that go beyond folders and dates.
 

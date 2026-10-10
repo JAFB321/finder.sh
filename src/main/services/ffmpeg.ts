@@ -50,12 +50,12 @@ function lookup(name: 'ffmpeg' | 'ffprobe', envDir: string | null): string | nul
 let cached: FfmpegPaths | null | undefined
 
 /**
- * Resolution order: THEFINDER_FFMPEG (binary path or dir), PATH, common install dirs, bundled
+ * Resolution order: FINDERSH_FFMPEG (binary path or dir), PATH, common install dirs, bundled
  * ffmpeg-static (ffprobe is system-only). Synchronous so the worker pool can get it at construction.
  */
 export function resolveFfmpeg(): FfmpegPaths | null {
   if (cached !== undefined) return cached
-  const env = process.env.THEFINDER_FFMPEG
+  const env = process.env.FINDERSH_FFMPEG
   const envBin = env && /ffmpeg(\.exe)?$/i.test(env) ? executable(env) : null
   const envDir = env && !envBin ? env : envBin ? join(envBin, '..') : null
   const ffmpeg = envBin ?? lookup('ffmpeg', envDir)

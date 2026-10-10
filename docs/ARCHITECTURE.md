@@ -23,7 +23,7 @@
 └───────────────────────────────────────────────────────┘
 ```
 
-## Data dir `~/.thefinder/`
+## Data dir `~/.finder.sh/`
 
 ```
 library.db          SQLite, WAL mode
@@ -33,6 +33,8 @@ models/             ONNX CLIP weights (downloaded on first use)
 config.json         roots, ui prefs
 logs/
 ```
+
+Pre-rename installs used `~/.thefinder/`: on startup, if `~/.finder.sh` is missing and the old dir exists, main renames it in place (`migrateLegacyHome` in `src/main/paths.ts`; skipped when `FINDERSH_HOME` is set). Renderer UI prefs (`localStorage`) are copied from the old Electron userData dir `the-finder/` the same way.
 
 ## Core tables (see `src/main/db/schema.sql`)
 
@@ -69,7 +71,7 @@ logs/
 - Color: query color → Lab; rank by min ΔE against each asset's top-5 dominant colors weighted.
 - Similar: `vec_clip` KNN (cosine) top 100, fallback to pHash hamming ≤ 10 when embeddings missing.
 - Duplicates: same base filename across folders (case-insensitive, ext ignored) OR identical bytes. Byte check: same size → `quick_hash` (first+last 64 KB) → full sha1 (`files.full_hash`), hashed lazily in the background (4 concurrent) with `duplicates:progress` pushes. pHash is only the fallback for "Similar to" when no CLIP embedding exists.
-- Videos: ffmpeg frame at 10 % of duration → same WebP chain; ffprobe for duration/size/creation_time (fallback: parse ffmpeg stderr). `indexVideos` in `~/.thefinder/config.json`.
+- Videos: ffmpeg frame at 10 % of duration → same WebP chain; ffprobe for duration/size/creation_time (fallback: parse ffmpeg stderr). `indexVideos` in `~/.finder.sh/config.json`.
 
 ## IPC contract
 
@@ -86,10 +88,10 @@ logs/
 
 Main process honours a few env vars / flags so the app can be driven without a human:
 
-- `THEFINDER_HOME=<dir>` — use an isolated data dir instead of `~/.thefinder`.
+- `FINDERSH_HOME=<dir>` — use an isolated data dir instead of `~/.finder.sh`.
 - `--add-root <path>` — register a folder at startup (no dialog).
-- `THEFINDER_SCREENSHOT=<png>` (+ `THEFINDER_SCREENSHOT_DELAY` ms) — capture the window once.
-- `THEFINDER_STEPS='[{"wait":ms,"eval":"<js in renderer>","shot":"<png>"}]'` — scripted scenario. The renderer exposes `window.__tf` (zustand store) and `window.api`.
+- `FINDERSH_SCREENSHOT=<png>` (+ `FINDERSH_SCREENSHOT_DELAY` ms) — capture the window once.
+- `FINDERSH_STEPS='[{"wait":ms,"eval":"<js in renderer>","shot":"<png>"}]'` — scripted scenario. The renderer exposes `window.__tf` (zustand store) and `window.api`.
 - Renderer console errors/warnings are relayed to stdout as `[renderer:error] …`.
 
 `backgroundThrottling` is disabled on the window so `capturePage` returns a fresh frame even when unfocused.

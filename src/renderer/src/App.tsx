@@ -11,7 +11,7 @@ import { useLibrary } from './features/library/store'
 import { TooltipProvider } from './components/ui/Tooltip'
 import type { LayoutKind } from '@shared/types'
 
-// automation hook (see THEFINDER_STEPS in main); harmless in production
+// automation hook (see FINDERSH_STEPS in main); harmless in production
 ;(window as unknown as { __tf: typeof useLibrary }).__tf = useLibrary
 
 export default function App(): React.JSX.Element {

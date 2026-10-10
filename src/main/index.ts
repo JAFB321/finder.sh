@@ -1,8 +1,8 @@
 import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
-import { writeFileSync } from 'fs'
+import { cpSync, existsSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { ensureDirs } from './paths'
+import { ensureDirs, migrateLegacyHome } from './paths'
 import { getDb, closeDb } from './db'
 import { IndexQueue } from './indexer/queue'
 import { registerSchemes, installProtocols } from './services/protocols'
@@ -13,8 +13,18 @@ import { startWatcher, stopWatcher } from './services/watcher'
 import { scanRoot } from './indexer/scanner'
 
 registerSchemes()
+migrateLegacyUserData()
 
 let queue: IndexQueue | null = null
+
+/** Carry renderer localStorage (UI prefs) over from the pre-rename userData dir. Runs before any window opens. */
+function migrateLegacyUserData(): void {
+  const from = join(app.getPath('appData'), 'the-finder', 'Local Storage')
+  const to = join(app.getPath('userData'), 'Local Storage')
+  if (!existsSync(from) || existsSync(to)) return
+  cpSync(from, to, { recursive: true })
+  console.log(`[paths] copied ${from} -> ${to}`)
+}
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -36,7 +46,7 @@ function createWindow(): BrowserWindow {
   win.on('ready-to-show', () => win.show())
   // Relay renderer console + crashes to stdout so headless runs (and `pnpm dev` logs) show UI errors.
   win.webContents.on('console-message', (ev) => {
-    if (ev.level === 'error' || ev.level === 'warning' || process.env.THEFINDER_VERBOSE)
+    if (ev.level === 'error' || ev.level === 'warning' || process.env.FINDERSH_VERBOSE)
       console.log(`[renderer:${ev.level}] ${ev.message} (${ev.sourceId}:${ev.lineNumber})`)
   })
   win.webContents.on('render-process-gone', (_e, d) => console.error('[renderer gone]', d.reason))
@@ -56,9 +66,10 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('dev.jafb321.thefinder')
+  electronApp.setAppUserModelId('sh.finder.app')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
+  migrateLegacyHome()
   ensureDirs()
   getDb()
 
@@ -76,14 +87,14 @@ app.whenReady().then(() => {
 
   const win = createWindow()
 
-  // Dev/automation hooks: `--add-root <path>` registers a folder; THEFINDER_SCREENSHOT=<png> captures the window after load.
+  // Dev/automation hooks: `--add-root <path>` registers a folder; FINDERSH_SCREENSHOT=<png> captures the window after load.
   const argIdx = process.argv.indexOf('--add-root')
   if (argIdx > 0 && process.argv[argIdx + 1]) {
     addRoot(process.argv[argIdx + 1])
   }
-  // THEFINDER_STEPS='[{"wait":5000,"eval":"__tf.getState().setFilter({text:\"dog\"})","shot":"/tmp/a.png"}]'
-  if (process.env.THEFINDER_STEPS) {
-    const steps = JSON.parse(process.env.THEFINDER_STEPS) as {
+  // FINDERSH_STEPS='[{"wait":5000,"eval":"__tf.getState().setFilter({text:\"dog\"})","shot":"/tmp/a.png"}]'
+  if (process.env.FINDERSH_STEPS) {
+    const steps = JSON.parse(process.env.FINDERSH_STEPS) as {
       wait?: number
       eval?: string
       shot?: string
@@ -111,12 +122,12 @@ app.whenReady().then(() => {
       }
     })()
   }
-  if (process.env.THEFINDER_SCREENSHOT) {
-    const delay = Number(process.env.THEFINDER_SCREENSHOT_DELAY ?? 8000)
+  if (process.env.FINDERSH_SCREENSHOT) {
+    const delay = Number(process.env.FINDERSH_SCREENSHOT_DELAY ?? 8000)
     setTimeout(async () => {
       const img = await win.webContents.capturePage()
-      writeFileSync(process.env.THEFINDER_SCREENSHOT!, img.toPNG())
-      console.log('[screenshot]', process.env.THEFINDER_SCREENSHOT)
+      writeFileSync(process.env.FINDERSH_SCREENSHOT!, img.toPNG())
+      console.log('[screenshot]', process.env.FINDERSH_SCREENSHOT)
     }, delay)
   }
 

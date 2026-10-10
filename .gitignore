@@ -5,7 +5,7 @@ out
 .eslintcache
 *.log*
 
-# app data lives in ~/.thefinder, never here
-.thefinder/
+# app data lives in ~/.finder.sh, never here
+.finder.sh/
 *.tsbuildinfo
 coverage/

@@ -1,6 +1,6 @@
-# The Finder — working harness
+# finder.sh — working harness
 
-Local-first photo library app. Electron + electron-vite + React 19 + TS. SQLite in `~/.thefinder`.
+Local-first photo library app. Electron + electron-vite + React 19 + TS. SQLite in `~/.finder.sh`.
 Read `docs/ARCHITECTURE.md` before touching main-process code. Product scope lives in `docs/PRODUCT.md`. Decisions in `docs/DECISIONS.md` (append, never rewrite).
 
 ## Toolchain
@@ -13,7 +13,7 @@ Node 22 via nvm (`.nvmrc`). Run `source ~/.nvm/nvm.sh && nvm use` before any pnp
 pnpm dev          # electron-vite dev (HMR renderer, restarts main on change)
 pnpm check        # typecheck + lint + tests — run before every commit
 pnpm test         # vitest (pure logic: layouts, phash, color, db queries)
-pnpm build:mac    # unsigned arm64 DMG in dist/ (~170 MB); smoke-test the packaged binary with THEFINDER_HOME + THEFINDER_STEPS before shipping
+pnpm build:mac    # unsigned arm64 DMG in dist/ (~170 MB); smoke-test the packaged binary with FINDERSH_HOME + FINDERSH_STEPS before shipping
 ```
 
 ## Layout
@@ -47,5 +47,5 @@ docs/            foundations. Keep current.
 User library: `~/Pictures` (~10k files, 5.2k Sony ARW) and `/Volumes/PortableSSD`. For quick tests use a small folder under `~/Pictures/Sony A7c/Places/` (check size with `find <dir> -type f | wc -l`). Headless smoke run:
 
 ```bash
-THEFINDER_HOME=/tmp/tfhome THEFINDER_SCREENSHOT=/tmp/shot.png pnpm exec electron . --add-root "<folder>"
+FINDERSH_HOME=/tmp/tfhome FINDERSH_SCREENSHOT=/tmp/shot.png pnpm exec electron . --add-root "<folder>"
 ```

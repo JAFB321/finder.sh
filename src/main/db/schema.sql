@@ -1,4 +1,4 @@
--- The Finder library schema. Applied idempotently on startup (see index.ts migrations).
+-- finder.sh library schema. Applied idempotently on startup (see index.ts migrations).
 
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,

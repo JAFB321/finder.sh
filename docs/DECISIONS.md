@@ -42,3 +42,7 @@ Research (feedback #1):
 - **Lightroom Classic / Capture One** — date tree (Year › Month › Day) in a side panel as a filter. Precise but slow to skim; we already have folder/filter UI for that.
 
 Chosen design (desktop + keyboard-first): Google/Immich model, no separate zoom screens. Layout `timeline` (key `Y`; `5` is taken by the purple label) = justified rows split into sections by `takenAt` (Day / Month / Year, `Auto` = by thumb size, `[` `]` to change), undated assets in a final "Unknown date" section. `computeLayout` takes optional `sections` and returns `headers`, so `navigate()`, `BoxIndex` and selection keep working unchanged. One absolutely positioned floating header (pushed up by the next header) instead of CSS sticky inside the virtual canvas. Scrubber maps pointer ↔ scroll offset linearly (like Immich), so ticks land where their section reaches the top and dragging is continuous; it fades from 40 % to 100 % on scroll/hover. Timeline order (takenAt desc, undated last) is applied client-side over the server order instead of rewriting `filter.sort`: works for any filter (similar-to, random), switching layouts never refetches 36k tiles, and leaving the timeline restores the server order.
+
+## 2026-10-10 — Renamed to finder.sh
+
+New name `finder.sh` (a wink at shell scripts): a finder for photos, built by a programmer who shoots. Package `finder-sh`, appId `sh.finder.app`, data dir `~/.finder.sh` (old `~/.thefinder` is renamed on first launch), env hooks `FINDERSH_*`. The local checkout folder keeps its old name.

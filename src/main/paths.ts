@@ -1,8 +1,10 @@
 import { homedir } from 'os'
 import { join } from 'path'
-import { mkdirSync } from 'fs'
+import { existsSync, mkdirSync, renameSync } from 'fs'
 
-const base = process.env.THEFINDER_HOME ?? join(homedir(), '.thefinder')
+const defaultBase = join(homedir(), '.finder.sh')
+const legacyBase = join(homedir(), '.thefinder')
+const base = process.env.FINDERSH_HOME ?? defaultBase
 
 export const paths = {
   base,
@@ -13,6 +15,14 @@ export const paths = {
   models: join(base, 'models'),
   logs: join(base, 'logs'),
   config: join(base, 'config.json')
+}
+
+/** One-time move of the pre-rename data dir (`~/.thefinder`). Same volume, so the rename is instant. */
+export function migrateLegacyHome(): void {
+  if (process.env.FINDERSH_HOME) return
+  if (existsSync(defaultBase) || !existsSync(legacyBase)) return
+  renameSync(legacyBase, defaultBase)
+  console.log(`[paths] moved ${legacyBase} -> ${defaultBase}`)
 }
 
 export function ensureDirs(): void {

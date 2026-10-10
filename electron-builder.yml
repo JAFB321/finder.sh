@@ -1,5 +1,5 @@
-appId: dev.jafb321.thefinder
-productName: The Finder
+appId: sh.finder.app
+productName: finder.sh
 copyright: © jafb321
 directories:
   buildResources: build
@@ -37,10 +37,10 @@ mac:
       arch: [arm64]
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    NSPhotoLibraryUsageDescription: The Finder indexes the photo folders you choose.
+    NSPhotoLibraryUsageDescription: finder.sh indexes the photo folders you choose.
   # unsigned for now: first launch needs right-click → Open (or `xattr -d com.apple.quarantine`)
   identity: null
   notarize: false
 dmg:
-  artifactName: ${name}-${version}-${arch}.${ext}
+  artifactName: ${productName}-${version}-${arch}.${ext}
 npmRebuild: false
