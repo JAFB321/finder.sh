@@ -9,6 +9,7 @@ files:
   - '!**/.vscode/*'
   - '!src/*'
   - '!docs/*'
+  - '!branding/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!vitest.config.ts'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md,CLAUDE.md}'
@@ -31,6 +32,7 @@ asarUnpack:
   - node_modules/better-sqlite3/build/**
   - node_modules/ffmpeg-static/**
 mac:
+  icon: build/icon.icns
   category: public.app-category.photography
   target:
     - target: dmg

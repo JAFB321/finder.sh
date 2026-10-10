@@ -46,3 +46,7 @@ Chosen design (desktop + keyboard-first): Google/Immich model, no separate zoom 
 ## 2026-10-10 — Renamed to finder.sh
 
 New name `finder.sh` (a wink at shell scripts): a finder for photos, built by a programmer who shoots. Package `finder-sh`, appId `sh.finder.app`, data dir `~/.finder.sh` (old `~/.thefinder` is renamed on first launch), env hooks `FINDERSH_*`. The local checkout folder keeps its old name.
+
+## 2026-10-10 — Brand: viewfinder + chevron
+
+Mark = four viewfinder corner brackets framing a `›` chevron in the accent (`#7c9cff`), on a night-blue continuous-corner icon. Wordmark `finder.sh` in JetBrains Mono Medium, `.sh` in the accent. Explored: plain cursor block, crop marks, `›_` prompt, lens ring, stacked prints, light icon; the full `›_` prompt and trailing cursor read as "terminal app", so the prompt was reduced to the chevron alone. SVG masters with outlined text live in `branding/`; `node branding/render.mjs` rebuilds the `.icns`/`.ico`/PNGs.

@@ -1,4 +1,4 @@
-# finder.sh
+<p align="center"><img src="branding/readme-header.svg" alt="finder.sh — a local-first photo library for macOS" width="100%"></p>
 
 A local-first photo library for macOS. Point it at the folders where your photos already live (internal disk or external drives), and it indexes them in place: fast virtualized grid, RAW+JPG pairing, color labels, keywords, collections, dominant-color and "looks like this" search, and natural-language search with on-device CLIP. Nothing is uploaded, and your image files are never modified.
 
@@ -45,6 +45,7 @@ pnpm build:mac    # unsigned arm64 DMG in dist/
 - [Decisions](docs/DECISIONS.md): why things are the way they are
 - [Shortcuts](docs/SHORTCUTS.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Brand](branding/README.md): logo, colours, type
 
 ## License
 

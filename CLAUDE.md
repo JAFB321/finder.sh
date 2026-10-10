@@ -28,6 +28,7 @@ src/preload/     contextBridge. Exposes `window.api` typed from src/shared/ipc.t
 src/shared/      types + IPC contract shared main<->renderer. No runtime deps.
 src/renderer/    React. features/<domain>/ (components+hooks+store), components/ui/ (primitives), lib/.
 docs/            foundations. Keep current.
+branding/        logo/icon SVG masters (text outlined) + render.mjs → build/icon.{icns,ico,png}. See branding/README.md.
 ```
 
 ## Rules

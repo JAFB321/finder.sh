@@ -319,6 +319,25 @@ function Empty(): React.JSX.Element {
   const loading = useLibrary((s) => s.loading)
   return (
     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-fg-3">
+      {!loading && (
+        // brand mark (branding/mark-on-dark.svg), frame dimmed so it stays quiet
+        <svg viewBox="242 242 540 540" className="mb-3 size-12" aria-hidden="true">
+          <path
+            d="M262 382V262h120M642 262h120v120M762 642v120H642M382 762H262V642"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="40"
+            strokeLinecap="square"
+          />
+          <path
+            d="M474 432l80 80-80 80"
+            fill="none"
+            stroke="var(--color-accent)"
+            strokeWidth="44"
+            strokeLinecap="square"
+          />
+        </svg>
+      )}
       <div className="text-[15px] font-medium text-fg-2">
         {loading ? 'Loading…' : 'Nothing here'}
       </div>
