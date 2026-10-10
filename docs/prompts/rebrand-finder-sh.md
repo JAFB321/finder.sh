@@ -16,7 +16,7 @@ Naming rules:
 | Electron `appId` | `sh.finder.app` |
 | Data dir | `~/.finder.sh` |
 | Env hooks | `FINDERSH_HOME`, `FINDERSH_STEPS`, `FINDERSH_SCREENSHOT`, `FINDERSH_SCREENSHOT_DELAY`, `FINDERSH_FFMPEG`, `FINDERSH_VERBOSE` |
-| Local folder | rename `~/personal-projects/the-finder` → `~/personal-projects/finder.sh` (tell the user to close terminals/editors on it first; do it last) |
+| Local folder | **keep** `~/personal-projects/the-finder` as is (do NOT rename or move it) |
 
 Steps:
 1. `grep -rni "the-finder\|thefinder\|the finder\|THEFINDER" --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=out .` and replace every occurrence consistently: `package.json`, `electron-builder.yml`, `src/main/paths.ts`, `src/main/index.ts` (window title, setAppUserModelId, env hooks), `src/renderer/index.html` `<title>`, UI strings, `README.md`, `CLAUDE.md`, all of `docs/`, test fixtures, prettier/eslint ignores. Keep the git history (no re-init).
